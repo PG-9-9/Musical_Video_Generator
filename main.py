@@ -142,75 +142,67 @@ def main():
         with open("outputs/pipeline_outputs.json", "w", encoding="utf-8") as f:
             json.dump(pipeline_out, f, indent=2)
 
-        # Layer 4: attach audio and finalize (pass clip objects to avoid import mismatches)
+        # Layer 4: attach audio and finalize (try MoviePy -> ffmpeg -> orchestrator)
+        muxed_path = "outputs/final_with_audio.mp4"
+        attached = False
+        # Try MoviePy attach first (we used MoviePy earlier for video writing)
         try:
-            print("[10/10] Attaching audio to styled video (ffmpeg mux preferred)...")
-            import shutil, subprocess
-            ffmpeg = shutil.which('ffmpeg') or shutil.which('ffmpeg.exe')
-            muxed_path = "outputs/final_with_audio.mp4"
-            # Prefer using MoviePy directly (we used it successfully earlier); if that fails, try ffmpeg mux; otherwise orchestrator.
+            styled_clip = VideoFileClip(styled_path)
+            audio_clip = AudioFileClip(music_path)
             try:
-                styled_clip = VideoFileClip(styled_path)
-                audio_clip = AudioFileClip(music_path)
-                try:
-                    if audio_clip.duration > styled_clip.duration:
-                        audio_clip = audio_clip.subclip(0, styled_clip.duration)
-                    elif audio_clip.duration < styled_clip.duration:
-                        try:
-                            from moviepy.audio.fx.all import audio_loop
-                            audio_clip = audio_clip.fx(audio_loop, duration=styled_clip.duration)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-                final_clip = styled_clip.set_audio(audio_clip)
-                final_clip.write_videofile(muxed_path, codec="libx264", audio_codec="aac")
-                final_clip.close()
-                try:
-                    styled_clip.close()
-                    audio_clip.close()
-                except Exception:
-                    pass
-                pipeline_out['final_with_audio'] = muxed_path
-                with open("outputs/pipeline_outputs.json", "w", encoding="utf-8") as f:
-                    json.dump(pipeline_out, f, indent=2)
-                print("Final video with audio written to:", muxed_path)
-            except Exception as e_mp:
-                print("MoviePy attach failed, trying ffmpeg mux:", e_mp)
-                # If system ffmpeg not found, try moviepy's configured binary
+                if audio_clip.duration > styled_clip.duration:
+                    audio_clip = audio_clip.subclip(0, styled_clip.duration)
+                elif audio_clip.duration < styled_clip.duration:
+                    try:
+                        from moviepy.audio.fx.all import audio_loop
+                        audio_clip = audio_clip.fx(audio_loop, duration=styled_clip.duration)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            final_clip = styled_clip.set_audio(audio_clip)
+            final_clip.write_videofile(muxed_path, codec="libx264", audio_codec="aac")
+            final_clip.close()
+            try:
+                styled_clip.close()
+                audio_clip.close()
+            except Exception:
+                pass
+            pipeline_out['final_with_audio'] = muxed_path
+            attached = True
+        except Exception:
+            # MoviePy attach failed; try ffmpeg mux
+            try:
+                import shutil, subprocess
+                ffmpeg = shutil.which('ffmpeg') or shutil.which('ffmpeg.exe')
                 if not ffmpeg:
                     try:
                         import imageio_ffmpeg as _iioff
                         ffmpeg = _iioff.get_ffmpeg_exe()
                     except Exception:
-                        ffmpeg = ffmpeg
+                        ffmpeg = None
                 if ffmpeg and os.path.exists(styled_path) and os.path.exists(music_path):
                     cmd = [ffmpeg, '-y', '-i', styled_path, '-i', music_path, '-c:v', 'copy', '-c:a', 'aac', '-shortest', muxed_path]
-                    try:
-                        subprocess.run(cmd, check=True)
-                        print("ffmpeg mux succeeded ->", muxed_path)
-                        pipeline_out['final_with_audio'] = muxed_path
-                        with open("outputs/pipeline_outputs.json", "w", encoding="utf-8") as f:
-                            json.dump(pipeline_out, f, indent=2)
-                        print("Final video with audio written to:", muxed_path)
-                    except Exception as e_ff:
-                        print("ffmpeg mux failed, falling back to orchestrator:", e_ff)
-                        out = orchestrate_final(styled_path, music_path, lyrics, "outputs/semantic_timeline.json", "outputs/beat_analysis.json", output_path=muxed_path)
-                        print("Orchestrator produced:", out)
-                        pipeline_out['final_with_audio'] = out.get('output_path')
-                        with open("outputs/pipeline_outputs.json", "w", encoding="utf-8") as f:
-                            json.dump(pipeline_out, f, indent=2)
-                        print("Final video with audio written to:", out.get('output_path'))
-                else:
-                    print("ffmpeg not available or inputs missing; attempting orchestrator fallback...")
+                    subprocess.run(cmd, check=True)
+                    pipeline_out['final_with_audio'] = muxed_path
+                    attached = True
+            except Exception:
+                # ffmpeg mux failed or not available; use orchestrator as last resort
+                try:
                     out = orchestrate_final(styled_path, music_path, lyrics, "outputs/semantic_timeline.json", "outputs/beat_analysis.json", output_path=muxed_path)
-                print("Orchestrator produced:", out)
-                pipeline_out['final_with_audio'] = out.get('output_path')
-                with open("outputs/pipeline_outputs.json", "w", encoding="utf-8") as f:
-                    json.dump(pipeline_out, f, indent=2)
-                print("Final video with audio written to:", out.get('output_path'))
-        except Exception as e:
-            print("Layer 4 audio attach failed:", e)
+                    pipeline_out['final_with_audio'] = out.get('output_path')
+                    attached = True if out.get('output_path') else False
+                except Exception as e:
+                    print("Layer 4 orchestration failed:", e)
+
+        # Finalize pipeline outputs metadata (ensure final_with_audio key is set to path or null)
+        pipeline_out['final_with_audio'] = pipeline_out.get('final_with_audio') or None
+        with open("outputs/pipeline_outputs.json", "w", encoding="utf-8") as f:
+            json.dump(pipeline_out, f, indent=2)
+        if attached:
+            print("Final video with audio written to:", pipeline_out['final_with_audio'])
+        else:
+            print("Failed to attach audio; see logs for details. pipeline_outputs.json updated.")
     except Exception as e:
         print("Layer 5 styling failed:", e)
         import traceback

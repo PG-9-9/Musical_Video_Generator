@@ -60,17 +60,8 @@ def orchestrate_final(styled_video_path: str = None, music_path: str = None, lyr
                 pass
 
         if not callable(VideoFileClip) or not callable(AudioFileClip):
-            # Can't perform orchestration without moviepy; fallback to copying styled video
-            try:
-                # attempt a safe copy
-                import shutil
-                if styled_video_path:
-                    shutil.copyfile(styled_video_path, output_path)
-                    return {"output_path": output_path, "duration": None, "notes": "moviepy not available; copied styled video"}
-                else:
-                    raise RuntimeError("moviepy not importable and no styled_video_path provided")
-            except Exception as e:
-                raise RuntimeError("MoviePy not importable in this environment: cannot attach audio") from e
+            # Can't perform orchestration without moviepy. Do not silently copy files.
+            raise RuntimeError("MoviePy not importable in this environment: orchestrator requires moviepy. Install moviepy or use ffmpeg mux in main.py")
 
         # Prefer clip objects passed in by caller to avoid re-import surprises
         clip = video_clip if video_clip is not None else VideoFileClip(styled_video_path)
