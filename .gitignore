@@ -1,0 +1,10 @@
+*.mp4
+*.wav
+*.json 
+
+config.json
+
+outputs/
+.vscode/
+__pycache__/
+
