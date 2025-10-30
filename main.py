@@ -7,7 +7,23 @@ from layer_2.beat_analysis import analyze_beats
 from layer_3 import generate_animation
 from layer_5.style_profiles import STYLE_PROFILES
 from layer_5.style_applier import build_style_timeline, apply_styles_to_frames
-from moviepy import VideoFileClip
+from layer_4.orchestrator import orchestrate_final
+# Robust MoviePy imports to support multiple layouts
+VideoFileClip = None
+AudioFileClip = None
+try:
+    from moviepy.editor import VideoFileClip, AudioFileClip
+except Exception:
+    try:
+        from moviepy import VideoFileClip, AudioFileClip
+    except Exception:
+        try:
+            from moviepy.video.io.VideoFileClip import VideoFileClip
+            from moviepy.audio.io.AudioFileClip import AudioFileClip
+        except Exception:
+            VideoFileClip = None
+            AudioFileClip = None
+
 from PIL import Image
 import numpy as np
 
@@ -29,8 +45,19 @@ def main():
     print("Semantic timeline written to outputs/semantic_timeline.json")
 
     print("[3/6] Generating music placeholder...")
+    # Build optional tempo/style hint from Gemini output if present
+    tempo_hint = None
+    try:
+        bpm = gemini_out.get('recommended_bpm')
+        if bpm:
+            tempo_hint = f"{int(bpm)} BPM"
+    except Exception:
+        tempo_hint = None
+
     music_path = generate_music_from_prompt(music_prompt, duration_sec=10, output_path="outputs/music.wav",
-                                            mubert_api_key=mubert_key)
+                                            mubert_api_key=mubert_key, semantic_timeline="outputs/semantic_timeline.json",
+                                            raw_lyrics=lyrics, global_mood=gemini_out.get('global_mood') or gemini_out.get('dominant_emotion'),
+                                            optional_tempo_style=tempo_hint)
 
     print("[4/6] Running beat/tempo analysis (Layer 2)...")
     beats = analyze_beats(audio_path=music_path, semantic_timeline_path="outputs/semantic_timeline.json", output_path="outputs/beat_analysis.json")
@@ -109,11 +136,81 @@ def main():
             beat_curve = energy[:total_frames] if energy else [0.0]*total_frames
 
         styled_out = "outputs/styled_final.mp4"
-        styled_path = apply_styles_to_frames(frames, style_tl, beat_curve, styled_out, fps=target_fps)
+        styled_path = apply_styles_to_frames(frames, style_tl, beat_curve, styled_out, fps=target_fps, lyrics=lyrics, semantic_timeline=sem)
         print("Styled video written to:", styled_path)
         pipeline_out['styled_video'] = styled_path
         with open("outputs/pipeline_outputs.json", "w", encoding="utf-8") as f:
             json.dump(pipeline_out, f, indent=2)
+
+        # Layer 4: attach audio and finalize (pass clip objects to avoid import mismatches)
+        try:
+            print("[10/10] Attaching audio to styled video (ffmpeg mux preferred)...")
+            import shutil, subprocess
+            ffmpeg = shutil.which('ffmpeg') or shutil.which('ffmpeg.exe')
+            muxed_path = "outputs/final_with_audio.mp4"
+            # Prefer using MoviePy directly (we used it successfully earlier); if that fails, try ffmpeg mux; otherwise orchestrator.
+            try:
+                styled_clip = VideoFileClip(styled_path)
+                audio_clip = AudioFileClip(music_path)
+                try:
+                    if audio_clip.duration > styled_clip.duration:
+                        audio_clip = audio_clip.subclip(0, styled_clip.duration)
+                    elif audio_clip.duration < styled_clip.duration:
+                        try:
+                            from moviepy.audio.fx.all import audio_loop
+                            audio_clip = audio_clip.fx(audio_loop, duration=styled_clip.duration)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                final_clip = styled_clip.set_audio(audio_clip)
+                final_clip.write_videofile(muxed_path, codec="libx264", audio_codec="aac")
+                final_clip.close()
+                try:
+                    styled_clip.close()
+                    audio_clip.close()
+                except Exception:
+                    pass
+                pipeline_out['final_with_audio'] = muxed_path
+                with open("outputs/pipeline_outputs.json", "w", encoding="utf-8") as f:
+                    json.dump(pipeline_out, f, indent=2)
+                print("Final video with audio written to:", muxed_path)
+            except Exception as e_mp:
+                print("MoviePy attach failed, trying ffmpeg mux:", e_mp)
+                # If system ffmpeg not found, try moviepy's configured binary
+                if not ffmpeg:
+                    try:
+                        import imageio_ffmpeg as _iioff
+                        ffmpeg = _iioff.get_ffmpeg_exe()
+                    except Exception:
+                        ffmpeg = ffmpeg
+                if ffmpeg and os.path.exists(styled_path) and os.path.exists(music_path):
+                    cmd = [ffmpeg, '-y', '-i', styled_path, '-i', music_path, '-c:v', 'copy', '-c:a', 'aac', '-shortest', muxed_path]
+                    try:
+                        subprocess.run(cmd, check=True)
+                        print("ffmpeg mux succeeded ->", muxed_path)
+                        pipeline_out['final_with_audio'] = muxed_path
+                        with open("outputs/pipeline_outputs.json", "w", encoding="utf-8") as f:
+                            json.dump(pipeline_out, f, indent=2)
+                        print("Final video with audio written to:", muxed_path)
+                    except Exception as e_ff:
+                        print("ffmpeg mux failed, falling back to orchestrator:", e_ff)
+                        out = orchestrate_final(styled_path, music_path, lyrics, "outputs/semantic_timeline.json", "outputs/beat_analysis.json", output_path=muxed_path)
+                        print("Orchestrator produced:", out)
+                        pipeline_out['final_with_audio'] = out.get('output_path')
+                        with open("outputs/pipeline_outputs.json", "w", encoding="utf-8") as f:
+                            json.dump(pipeline_out, f, indent=2)
+                        print("Final video with audio written to:", out.get('output_path'))
+                else:
+                    print("ffmpeg not available or inputs missing; attempting orchestrator fallback...")
+                    out = orchestrate_final(styled_path, music_path, lyrics, "outputs/semantic_timeline.json", "outputs/beat_analysis.json", output_path=muxed_path)
+                print("Orchestrator produced:", out)
+                pipeline_out['final_with_audio'] = out.get('output_path')
+                with open("outputs/pipeline_outputs.json", "w", encoding="utf-8") as f:
+                    json.dump(pipeline_out, f, indent=2)
+                print("Final video with audio written to:", out.get('output_path'))
+        except Exception as e:
+            print("Layer 4 audio attach failed:", e)
     except Exception as e:
         print("Layer 5 styling failed:", e)
         import traceback

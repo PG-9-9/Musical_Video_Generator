@@ -120,18 +120,44 @@ def generate_semantic_timeline(lyrics: str, layer0_summary: Optional[Dict[str, A
         raw = raw.strip("`\n \t").lstrip("json").strip()
 
     # Try to extract the first JSON array-looking substring ([ ... ]) to be robust
-    # to stray tokens the LLM may insert.
-    if "[" in raw and "]" in raw:
-        start = raw.find("[")
-        end = raw.rfind("]")
-        candidate = raw[start:end+1]
-    else:
-        candidate = raw
+    # to stray tokens the LLM may insert. If parsing fails, attempt up to two
+    # gentle retries with stricter instructions before falling back to a
+    # deterministic segmentation.
+    def _extract_candidate(text: str) -> str:
+        if "[" in text and "]" in text:
+            start = text.find("[")
+            end = text.rfind("]")
+            return text[start:end+1]
+        return text
 
+    candidate = _extract_candidate(raw)
+
+    segments = None
+    # Try initial parse
     try:
         segments = json.loads(candidate)
-    except Exception as e:
-        # Best-effort: try to recover JSON objects by brace matching
+    except Exception:
+        segments = None
+
+    # If initial parse failed, attempt up to two retries with a cleaner prompt
+    # that forces JSON-only output. This often recovers from noisy model output.
+    if segments is None:
+        retry_prompt = _build_prompt(lyrics, layer0_summary) + "\n\nIMPORTANT: Return ONLY a single JSON array and nothing else. Do not include prose or markdown."
+        for attempt in range(2):
+            try:
+                raw2 = _call_llm_for_segments(api_key, retry_prompt)
+                raw2 = raw2.strip()
+                if raw2.startswith("```"):
+                    raw2 = raw2.strip('`\n \t').lstrip('json').strip()
+                candidate2 = _extract_candidate(raw2)
+                segments = json.loads(candidate2)
+                break
+            except Exception:
+                segments = None
+
+    # If we still couldn't parse, try a best-effort object-extraction, then
+    # finally fall back to deterministic segmentation.
+    if segments is None:
         import re
         objs = re.findall(r"\{[^}]*\}", raw, re.S)
         if objs:
@@ -140,13 +166,9 @@ def generate_semantic_timeline(lyrics: str, layer0_summary: Optional[Dict[str, A
                 segments = json.loads(candidate2)
             except Exception:
                 segments = None
-        else:
-            segments = None
 
         if not segments:
-            # As a robust fallback, don't fail the pipeline: create simple equal segments
-            # by splitting the lyrics. This avoids hard failure when the LLM output is noisy.
-            print("Warning: LLM returned malformed JSON; falling back to deterministic segmentation.")
+            print("Warning: LLM returned malformed JSON after retries; falling back to deterministic segmentation.")
             # determine desired segment count
             min_segments = 3
             max_segments = 5
@@ -261,9 +283,19 @@ def generate_semantic_timeline(lyrics: str, layer0_summary: Optional[Dict[str, A
             cleaned[i]["intensity"] = avg
 
     # Ensure colors present
-    for s in cleaned:
-        if not s.get("color_hex"):
-            s["color_hex"] = COLOR_EMOTION_MAP.get(s.get("emotion", "neutral"), "#808080")
+    # If Layer 0 provided a color palette, use it to map segment colors (cyclically)
+    if layer0_summary and isinstance(layer0_summary, dict) and layer0_summary.get("color_palette"):
+        try:
+            palette = [c for c in layer0_summary.get("color_palette") if isinstance(c, str) and c.strip()]
+            if palette:
+                for idx, s in enumerate(cleaned):
+                    s["color_hex"] = palette[idx % len(palette)]
+        except Exception:
+            pass
+    else:
+        for s in cleaned:
+            if not s.get("color_hex"):
+                s["color_hex"] = COLOR_EMOTION_MAP.get(s.get("emotion", "neutral"), "#808080")
 
     # Final structure
     semantic_timeline = {"segments": cleaned, "duration_sec": total}

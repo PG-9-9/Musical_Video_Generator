@@ -1,3 +1,158 @@
+import os
+import json
+from typing import Optional, Dict
+
+# Robust moviepy imports: different installs expose different submodules.
+VideoFileClip = None
+AudioFileClip = None
+concatenate_videoclips = None
+CompositeVideoClip = None
+ColorClip = None
+ImageClip = None
+VideoClip = None
+try:
+    # preferred modern import
+    from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips, CompositeVideoClip, ColorClip, ImageClip, VideoClip
+except Exception:
+    try:
+        # fallback to submodule imports
+        from moviepy.video.io.VideoFileClip import VideoFileClip
+        from moviepy.audio.io.AudioFileClip import AudioFileClip
+        from moviepy.video.compositing.concatenate import concatenate_videoclips
+        from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+        from moviepy.video.fx.all import *
+        from moviepy.video.VideoClip import ColorClip, ImageClip, VideoClip
+    except Exception:
+        # Leave names as None; callers will get a clearer error later.
+        VideoFileClip = None
+        AudioFileClip = None
+        concatenate_videoclips = None
+        CompositeVideoClip = None
+        ColorClip = None
+        ImageClip = None
+        VideoClip = None
+
+
+def orchestrate_final(styled_video_path: str = None, music_path: str = None, lyrics: str = None,
+                      semantic_timeline_path: str = None, beat_analysis_path: str = None,
+                      output_path: str = "outputs/final_with_audio.mp4",
+                      video_clip=None, audio_clip=None) -> Dict[str, str]:
+    """Attach audio to the styled video, ensure lengths match, and write final MP4.
+
+    Returns a dict with keys: output_path, duration, notes
+    """
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    # If caller passed clip objects, prefer them and skip import checks
+    if video_clip is not None and audio_clip is not None:
+        clip = video_clip
+        audio = audio_clip
+    else:
+        # Defensive checks: some environments expose moviepy under different layouts.
+        global VideoFileClip, AudioFileClip, concatenate_videoclips
+        if not callable(VideoFileClip) or not callable(AudioFileClip):
+            try:
+                import moviepy.editor as _mpy
+                VideoFileClip = getattr(_mpy, 'VideoFileClip', VideoFileClip)
+                AudioFileClip = getattr(_mpy, 'AudioFileClip', AudioFileClip)
+                concatenate_videoclips = getattr(_mpy, 'concatenate_videoclips', concatenate_videoclips)
+            except Exception:
+                pass
+
+        if not callable(VideoFileClip) or not callable(AudioFileClip):
+            # Can't perform orchestration without moviepy; fallback to copying styled video
+            try:
+                # attempt a safe copy
+                import shutil
+                if styled_video_path:
+                    shutil.copyfile(styled_video_path, output_path)
+                    return {"output_path": output_path, "duration": None, "notes": "moviepy not available; copied styled video"}
+                else:
+                    raise RuntimeError("moviepy not importable and no styled_video_path provided")
+            except Exception as e:
+                raise RuntimeError("MoviePy not importable in this environment: cannot attach audio") from e
+
+        # Prefer clip objects passed in by caller to avoid re-import surprises
+        clip = video_clip if video_clip is not None else VideoFileClip(styled_video_path)
+        audio = audio_clip if audio_clip is not None else AudioFileClip(music_path)
+
+        # If the provided audio object doesn't support moviepy operations (subclip/duration),
+        # attempt a fast ffmpeg-based mux of the styled video + audio file (avoids moviepy callables).
+        try:
+            if not hasattr(audio, 'subclip') or not hasattr(audio, 'duration'):
+                import shutil, subprocess
+                ffmpeg = shutil.which('ffmpeg') or shutil.which('ffmpeg.exe')
+                if ffmpeg and styled_video_path and music_path and os.path.exists(styled_video_path) and os.path.exists(music_path):
+                    cmd = [ffmpeg, '-y', '-i', styled_video_path, '-i', music_path, '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path]
+                    try:
+                        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        return {"output_path": output_path, "duration": clip.duration if 'clip' in locals() and hasattr(clip, 'duration') else None, "notes": "orchestrated_via_ffmpeg"}
+                    except Exception:
+                        # if ffmpeg muxing fails, fall back to attempting moviepy coercion below
+                        pass
+                # try to coerce to a moviepy AudioFileClip using local imports as a fallback
+                try:
+                    import moviepy.editor as _mpy
+                    audio = _mpy.AudioFileClip(music_path)
+                except Exception:
+                    try:
+                        from moviepy import AudioFileClip as _AFP
+                        audio = _AFP(music_path)
+                    except Exception:
+                        # leave original audio; downstream code will handle length checks
+                        pass
+        except Exception:
+            pass
+
+    # If audio is longer than video, trim; if shorter, loop to fit video length
+    if audio.duration > clip.duration:
+        audio = audio.subclip(0, clip.duration)
+    elif audio.duration < clip.duration:
+        # Try to loop audio to match video duration. Prefer moviepy's audio_loop fx
+        try:
+            # audio.fx(audio_loop, duration) is preferred when available
+            from moviepy.audio.fx.all import audio_loop
+            audio = audio.fx(audio_loop, duration=clip.duration)
+        except Exception:
+            # Fallback: concatenate repeated subclips and try concatenate_audioclips
+            parts = []
+            rem = clip.duration
+            while rem > 0:
+                take = min(rem, audio.duration)
+                parts.append(audio.subclip(0, take))
+                rem -= take
+            if parts:
+                try:
+                    from moviepy.audio.fx.all import audio_loop as _al
+                    audio = audio.fx(_al, duration=clip.duration)
+                except Exception:
+                    try:
+                        from moviepy.editor import concatenate_audioclips
+                        audio = concatenate_audioclips(parts)
+                    except Exception:
+                        # last resort: use the first part and let it repeat implicitly
+                        audio = parts[0]
+
+    final = clip.set_audio(audio)
+
+    # Write final file
+    final.write_videofile(output_path, codec="libx264", audio_codec="aac")
+
+    # Write a small events JSON for debugging
+    events = {
+        "styled_video": styled_video_path,
+        "music": music_path,
+        "output": output_path,
+        "video_duration": clip.duration,
+        "audio_duration": audio.duration,
+    }
+    try:
+        with open("outputs/final_events.json", "w", encoding="utf-8") as f:
+            json.dump(events, f, indent=2)
+    except Exception:
+        pass
+
+    return {"output_path": output_path, "duration": clip.duration, "notes": "orchestrated"}
 """Layer 4 orchestrator: compose animated visuals + audio + subtitles + beat overlays into final.mp4
 
 Inputs:
@@ -15,7 +170,7 @@ import json
 import os
 from typing import Dict, Any, List
 
-from moviepy.editor import VideoFileClip, AudioFileClip, CompositeVideoClip, ColorClip, ImageClip, VideoClip
+# moviepy imports handled at top of file (robust import attempts)
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from layer_3.visuals import effects
@@ -202,19 +357,25 @@ def make_beat_overlays(beats: List[float], video_w: int, video_h: int, energy_cu
     return clips
 
 
-def compose_final(animated_path: str = "outputs/animated.mp4", music_path: str = "outputs/music.wav", semantic_path: str = "outputs/semantic_timeline.json", beat_path: str = "outputs/beat_analysis.json", lyrics_path: str = "lyrics.txt", output_path: str = "outputs/final.mp4", events_path: str = "outputs/layer4_events.json", config: Dict[str, Any] = None):
+def compose_final(animated_path: str = "outputs/animated.mp4", music_path: str = "outputs/music.wav", semantic_path: str = "outputs/semantic_timeline.json", beat_path: str = "outputs/beat_analysis.json", lyrics_path: str = "lyrics.txt", output_path: str = "outputs/final.mp4", events_path: str = "outputs/layer4_events.json", config: Dict[str, Any] = None, video_clip=None, audio_clip=None):
     if config is None:
         config = {"subtitle_fontsize": 36, "subtitle_color": "white", "crossfade_sec": 0.3}
 
     # load inputs
-    if not os.path.exists(animated_path):
-        raise FileNotFoundError(animated_path)
-    video = VideoFileClip(animated_path)
+    if video_clip is None:
+        if not os.path.exists(animated_path):
+            raise FileNotFoundError(animated_path)
+        video = VideoFileClip(animated_path)
+    else:
+        video = video_clip
     video_w, video_h = int(video.w), int(video.h)
 
-    if not os.path.exists(music_path):
-        raise FileNotFoundError(music_path)
-    audio = AudioFileClip(music_path)
+    if audio_clip is None:
+        if not os.path.exists(music_path):
+            raise FileNotFoundError(music_path)
+        audio = AudioFileClip(music_path)
+    else:
+        audio = audio_clip
 
     with open(semantic_path, 'r', encoding='utf-8') as f:
         semantic = json.load(f)

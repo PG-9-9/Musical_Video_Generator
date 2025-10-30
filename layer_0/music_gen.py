@@ -21,6 +21,14 @@ try:
 except Exception:
     _TF_MUSICGEN_AVAILABLE = False
 
+# Also attempt to detect the lower-level model API (AutoProcessor + Musicgen)
+_TF_MODEL_API = None
+try:
+    from transformers import AutoProcessor, MusicgenForConditionalGeneration
+    _TF_MODEL_API = (AutoProcessor, MusicgenForConditionalGeneration)
+except Exception:
+    _TF_MODEL_API = None
+
 # audiocraft (fallback) availability
 _AUDIOCRAFT_AVAILABLE = False
 _MUSICGEN = None
@@ -44,8 +52,10 @@ def generate_placeholder_music(duration_sec: int = 10, output_path: str = "outpu
     return output_path
 
 
-def generate_music_from_prompt(music_prompt: str, duration_sec: int = 10, output_path: str = "outputs/music.wav",
-                               mubert_api_key: Optional[str] = None, semantic_timeline: Optional[object] = None) -> str:
+def generate_music_from_prompt(music_prompt: str = None, duration_sec: int = 10, output_path: str = "outputs/music.wav",
+                               mubert_api_key: Optional[str] = None, semantic_timeline: Optional[object] = None,
+                               raw_lyrics: Optional[str] = None, global_mood: Optional[str] = None,
+                               optional_tempo_style: Optional[str] = None) -> str:
     """
     Use Suno Bark (if available) to synthesize audio from a textual prompt. The code is
     defensive and tries multiple common Bark APIs to remain compatible across versions.
@@ -55,7 +65,7 @@ def generate_music_from_prompt(music_prompt: str, duration_sec: int = 10, output
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     # If a semantic timeline object/path was provided, build a richer prompt
-    def _build_prompt_from_timeline(prompt_base, timeline) -> str:
+    def _build_prompt_from_timeline(prompt_base, timeline, lyrics=None, mood=None, tempo_style=None) -> str:
         parts = [prompt_base.strip() if prompt_base else ""]
         try:
             import json
@@ -96,25 +106,118 @@ def generate_music_from_prompt(music_prompt: str, duration_sec: int = 10, output
         except Exception:
             # ignore timeline parsing errors and fall back to base prompt
             pass
+        # include a short lyrical excerpt to ground the music
+        if lyrics:
+            excerpt = " ".join([ln for ln in lyrics.splitlines() if ln.strip()][:3])
+            if excerpt:
+                parts.insert(0, f"Lyrics excerpt: {excerpt}")
+        if mood:
+            parts.insert(0, f"Global mood: {mood}")
+        if tempo_style:
+            parts.insert(0, f"Tempo/style hint: {tempo_style}")
         return " -- ".join([p for p in parts if p])
 
-    full_prompt = music_prompt
-    if semantic_timeline:
-        full_prompt = _build_prompt_from_timeline(music_prompt or "", semantic_timeline)
+    full_prompt = music_prompt or ""
+    if semantic_timeline or raw_lyrics or global_mood or optional_tempo_style:
+        full_prompt = _build_prompt_from_timeline(music_prompt or "", semantic_timeline, lyrics=raw_lyrics, mood=global_mood, tempo_style=optional_tempo_style)
 
-    # Try transformers pipeline-based MusicGen first (if available)
+    # Prefer the direct Transformers model API (AutoProcessor + Musicgen) if available.
+    if _TF_MODEL_API is not None:
+        try:
+            logging.getLogger(__name__).info("Attempting generation via Transformers MusicGen model API (AutoProcessor + Musicgen)")
+            AutoProcessor, MusicgenForConditionalGeneration = _TF_MODEL_API
+            proc = AutoProcessor.from_pretrained("facebook/musicgen-small")
+            model = MusicgenForConditionalGeneration.from_pretrained("facebook/musicgen-small")
+            # construct inputs
+            texts = [full_prompt]
+            inputs = proc(text=texts, padding=True, return_tensors="pt")
+            try:
+                import torch
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                model = model.to(device)
+                for k, v in list(inputs.items()):
+                    try:
+                        inputs[k] = v.to(device)
+                    except Exception:
+                        pass
+            except Exception:
+                device = "cpu"
+
+            gen = model.generate(**inputs)
+            # The model.generate(...) often returns a torch.Tensor of waveform samples.
+            try:
+                import numpy as _np
+                import soundfile as sf
+                try:
+                    import torch as _torch
+                except Exception:
+                    _torch = None
+
+                arr = None
+                # If it's a torch Tensor, convert to numpy
+                if _torch is not None and isinstance(gen, _torch.Tensor):
+                    arr = gen.cpu().numpy()
+                elif isinstance(gen, (list, tuple)):
+                    # try first element
+                    first = gen[0]
+                    if _torch is not None and isinstance(first, _torch.Tensor):
+                        arr = first.cpu().numpy()
+                    else:
+                        arr = _np.asarray(first)
+                else:
+                    try:
+                        arr = _np.asarray(gen)
+                    except Exception:
+                        arr = None
+
+                if arr is not None:
+                    # normalize shape: expect (channels, samples) or (1, samples) or (samples,)
+                    if arr.ndim == 3 and arr.shape[0] == 1:
+                        # (batch, channel, samples) -> take first batch
+                        arr = arr[0]
+                    if arr.ndim == 2 and arr.shape[0] == 1:
+                        arr = arr[0]
+                    # flatten to mono if necessary
+                    if arr.ndim > 1 and arr.shape[0] in (1,):
+                        arr = arr.reshape(-1)
+
+                    sr = getattr(proc, 'sampling_rate', getattr(model, 'sample_rate', 32000))
+                    try:
+                        sf.write(output_path, arr, sr)
+                        return output_path
+                    except Exception:
+                        # try fallback conversion via pydub if soundfile fails
+                        try:
+                            from pydub import AudioSegment
+                            import numpy as _np2
+                            int16 = (_np2.clip(arr, -1.0, 1.0) * (2**15 - 1)).astype('int16')
+                            seg = AudioSegment(int16.tobytes(), frame_rate=sr, sample_width=2, channels=1)
+                            seg.export(output_path, format='wav')
+                            return output_path
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+        except Exception as e:
+            logging.getLogger(__name__).exception("Transformers MusicGen model API failed")
+
+    # Next try the transformers pipeline if available
     if _TF_MUSICGEN_AVAILABLE and _TF_PIPELINE is not None:
         try:
             logging.getLogger(__name__).info("Attempting generation via transformers MusicGen pipeline")
-            res = _TF_PIPELINE(full_prompt, duration=duration_sec)
+            import inspect
+            # Call the pipeline with the prompt only. Avoid passing 'duration' which
+            # may not be accepted by the installed transformers pipeline implementation.
+            res = _TF_PIPELINE(full_prompt)
             audio_candidate = None
-            # pipeline may return dict or array or path
             if isinstance(res, dict):
-                audio_candidate = res.get("audio") or res.get("wav") or res.get("array") or res.get("samples")
+                # avoid using boolean-or on array-like values (NumPy arrays raise on truth checks)
+                for k in ("audio", "wav", "array", "samples"):
+                    if k in res and res[k] is not None:
+                        audio_candidate = res[k]
+                        break
             else:
                 audio_candidate = res
-
-            # If it returned a path
             if isinstance(audio_candidate, str) and os.path.exists(audio_candidate):
                 try:
                     seg = AudioSegment.from_file(audio_candidate)
@@ -122,8 +225,6 @@ def generate_music_from_prompt(music_prompt: str, duration_sec: int = 10, output
                     return output_path
                 except Exception:
                     pass
-
-            # If it returned an array-like
             try:
                 import numpy as _np
                 import soundfile as sf
@@ -133,7 +234,7 @@ def generate_music_from_prompt(music_prompt: str, duration_sec: int = 10, output
             except Exception:
                 pass
         except Exception as e:
-            logging.getLogger(__name__).warning("Transformers MusicGen pipeline failed: %s", e)
+            logging.getLogger(__name__).exception("Transformers MusicGen pipeline failed")
 
     # If Meta MusicGen (audiocraft) is available, use it.
     if _AUDIOCRAFT_AVAILABLE and _MUSICGEN is not None:
@@ -183,7 +284,7 @@ def generate_music_from_prompt(music_prompt: str, duration_sec: int = 10, output
                     raise
             return output_path
         except Exception as e:
-            logging.getLogger(__name__).warning("MusicGen generation failed, falling back: %s", e)
+            logging.getLogger(__name__).exception("MusicGen generation failed, falling back")
 
     # Fallback: make a simple placeholder audio so pipeline keeps running
     return generate_placeholder_music(duration_sec, output_path)

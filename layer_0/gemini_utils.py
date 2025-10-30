@@ -83,14 +83,19 @@ def analyze_lyrics(lyrics: str, config_path: str = "config.json") -> Dict[str, A
     model = get_gemini_client(api_key)
 
     prompt = f"""
-You are a creative media AI.
-Analyze the following lyrics and return a JSON with the following keys:
-- mood (string)
-- emotional_tone (string)
+You are an AI media composer.
+
+Analyze the following lyrics and return JSON with these keys:
+- global_mood (string)
+- dominant_emotion (string)
+- emotion_intensity (float 0-1)
+- emotion_keywords (list of 3-5 words)
 - recommended_bpm (integer)
-- visual_theme (string)
-- music_prompt (string: to generate background music for these lyrics)
-- video_prompt (string: detailed scene description for a 10 second animated loop)
+- color_palette (list of 3 HEX codes)
+- music_prompt (1-sentence music style description)
+- video_prompt (1-sentence visual description)
+
+{f"The target style is {'' if not lyrics else ''}." if False else ""}
 
 Lyrics:
 {lyrics}
@@ -162,4 +167,13 @@ Return ONLY valid JSON, no explanation.
         data = json.loads(text)
     except json.JSONDecodeError:
         raise ValueError("Gemini output was not valid JSON: " + text)
+
+    # persist a copy for downstream layers
+    try:
+        os.makedirs("outputs", exist_ok=True)
+        with open("outputs/lyrics_analysis.json", "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+    except Exception:
+        pass
+
     return data

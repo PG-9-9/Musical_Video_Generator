@@ -37,8 +37,15 @@ def build_style_timeline(semantic_timeline: Dict[str, Any], fps: int, duration_s
         t = seg.get("start_sec", 0.0)
         times.append(t)
         profile = get_style_profile(seg.get("emotion", "Calm"))
-        # style vector: palette color (rgb tuple of first color), contrast, motion_blur, intensity
-        rgb = _hex_to_rgb(profile["palette"][0])
+        # allow semantic timeline to override palette via color_hex
+        if seg.get("color_hex"):
+            try:
+                rgb = _hex_to_rgb(seg.get("color_hex"))
+            except Exception:
+                rgb = _hex_to_rgb(profile["palette"][0])
+        else:
+            # style vector: palette color (rgb tuple of first color), contrast, motion_blur, intensity
+            rgb = _hex_to_rgb(profile["palette"][0])
         contrast = float(profile.get("contrast", 1.0))
         motion_blur = float(profile.get("motion_blur", 0.3))
         intensity = float(seg.get("intensity", 0.5))
@@ -79,7 +86,7 @@ def build_style_timeline(semantic_timeline: Dict[str, Any], fps: int, duration_s
     return frames
 
 
-def apply_styles_to_frames(base_frames: List[Image.Image], style_timeline: List[Dict[str, Any]], beat_curve: List[float], out_path: str, fps: int=24):
+def apply_styles_to_frames(base_frames: List[Image.Image], style_timeline: List[Dict[str, Any]], beat_curve: List[float], out_path: str, fps: int=24, lyrics: str = None, semantic_timeline: Dict[str, Any] = None):
     """Apply per-frame style to a list of PIL Image frames and write a preview output.
 
     - base_frames: list of PIL Images (mode RGB)
@@ -97,6 +104,54 @@ def apply_styles_to_frames(base_frames: List[Image.Image], style_timeline: List[
         # energy modulation
         energy = beat_curve[i] if (beat_curve and i < len(beat_curve)) else 0.0
         img2 = _apply_energy_bloom(img2, energy, params)
+        # render karaoke-style subtitles if provided
+        karaoke_lines = None
+        highlight_idx = 0
+        if semantic_timeline and isinstance(semantic_timeline, dict):
+            segs = semantic_timeline.get("segments", [])
+            t = params.get("time", i / max(1.0, float(len(base_frames))))
+            for s in segs:
+                try:
+                    start = float(s.get("start_sec", 0.0))
+                    end = float(s.get("end_sec", start + 1.0))
+                except Exception:
+                    start, end = 0.0, 0.0
+                if start <= t < end:
+                    lines = s.get("lines") or []
+                    if isinstance(lines, list):
+                        karaoke_lines = [ln for ln in lines if ln]
+                    elif isinstance(lines, str):
+                        karaoke_lines = [lines]
+                    # compute highlight index based on progress through the segment
+                    seg_len = max(1e-6, (end - start))
+                    prog = min(1.0, max(0.0, (t - start) / seg_len))
+                    if karaoke_lines:
+                        highlight_idx = int(prog * len(karaoke_lines))
+                        if highlight_idx >= len(karaoke_lines):
+                            highlight_idx = len(karaoke_lines) - 1
+                    break
+        if karaoke_lines is None and lyrics:
+            # fallback: split a short excerpt into lines for karaoke
+            words = [w for w in lyrics.replace('\n', ' ').split() if w.strip()]
+            excerpt = " ".join(words[:24]) if words else ""
+            # break into 2-3 lines
+            if excerpt:
+                tokens = excerpt.split()
+                l1 = " ".join(tokens[:len(tokens)//2])
+                l2 = " ".join(tokens[len(tokens)//2:])
+                karaoke_lines = [l1, l2]
+                highlight_idx = 0
+
+        if karaoke_lines:
+            try:
+                img2 = _draw_karaoke_on_image(img2, karaoke_lines, highlight_idx)
+            except Exception:
+                try:
+                    # final fallback: simple subtitle renderer
+                    img2 = _draw_subtitle_on_image(img2, " ".join(karaoke_lines))
+                except Exception:
+                    pass
+
         styled.append(img2)
 
     # optional motion refinement (simple micro drift using beat curve)
@@ -226,3 +281,118 @@ def _smooth_array(arr: List[float], window: int = 3, length: int = None) -> List
             c += 1
         out[i] = s / max(1, c)
     return out
+
+
+def _wrap_text(text: str, draw, font, max_width: int):
+    # simple greedy wrap by words
+    words = text.split()
+    lines = []
+    cur = []
+    for w in words:
+        test = " ".join(cur + [w])
+        try:
+            if hasattr(draw, 'textbbox'):
+                w_box = draw.textbbox((0,0), test, font=font)
+                w_w = w_box[2] - w_box[0]
+            else:
+                w_w = draw.textsize(test, font=font)[0]
+        except Exception:
+            w_w = len(test) * (font.size if hasattr(font, 'size') else 8)
+        if w_w <= max_width or not cur:
+            cur.append(w)
+        else:
+            lines.append(" ".join(cur))
+            cur = [w]
+    if cur:
+        lines.append(" ".join(cur))
+    return lines
+
+
+def _draw_subtitle_on_image(img: Image.Image, text: str) -> Image.Image:
+    from PIL import ImageDraw, ImageFont
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("arial.ttf", 20)
+    except Exception:
+        try:
+            font = ImageFont.truetype("DejaVuSans.ttf", 18)
+        except Exception:
+            font = ImageFont.load_default()
+
+    w, h = img.size
+    max_w = int(w * 0.9)
+    lines = _wrap_text(text, draw, font, max_w)
+    # small outline and white text
+    y_start = int(h * 0.78)
+    spacing = int(max(16, (font.getsize("A")[1] if hasattr(font, 'getsize') else 16) + 2))
+    # draw up to 3 lines (last lines)
+    for idx, line in enumerate(lines[-3:]):
+        y = y_start + (idx * spacing)
+        # center alignment
+        if hasattr(draw, 'textbbox'):
+            tb = draw.textbbox((0,0), line, font=font)
+            text_w = tb[2] - tb[0]
+        else:
+            text_w = draw.textsize(line, font=font)[0]
+        x_left = (w - text_w) // 2
+        # outline
+        for ox, oy in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,1)]:
+            draw.text((x_left+ox, y+oy), line, font=font, fill=(0,0,0))
+        draw.text((x_left, y), line, font=font, fill=(255,255,255))
+    return img
+
+
+def _draw_karaoke_on_image(img: Image.Image, lines: List[str], highlight_idx: int) -> Image.Image:
+    """Draw up to 4 lines centered at the bottom and highlight the active line.
+
+    highlight_idx: index of the line to emphasize (0-based)
+    """
+    from PIL import ImageDraw, ImageFont
+    draw = ImageDraw.Draw(img)
+    try:
+        font_hl = ImageFont.truetype("arial.ttf", 22)
+        font = ImageFont.truetype("arial.ttf", 18)
+    except Exception:
+        try:
+            font_hl = ImageFont.truetype("DejaVuSans-Bold.ttf", 20)
+            font = ImageFont.truetype("DejaVuSans.ttf", 16)
+        except Exception:
+            font = ImageFont.load_default()
+            font_hl = font
+
+    w, h = img.size
+    max_w = int(w * 0.9)
+    # only keep up to 4 lines (last ones)
+    lines = lines[-4:]
+    # compute vertical start so lines sit near bottom
+    total_h = sum([(font_hl.getsize(line)[1] if hasattr(font_hl, 'getsize') else 20) for line in lines]) + (len(lines)-1)*6
+    y_start = int(h * 0.74) - total_h // 2
+
+    for idx, line in enumerate(lines):
+        is_hl = (idx == highlight_idx)
+        f = font_hl if is_hl else font
+        # measure width
+        if hasattr(draw, 'textbbox'):
+            tb = draw.textbbox((0,0), line, font=f)
+            text_w = tb[2] - tb[0]
+            text_h = tb[3] - tb[1]
+        else:
+            text_w, text_h = draw.textsize(line, font=f)
+        x = (w - text_w) // 2
+        y = y_start + idx * (text_h + 6)
+        # background pill for highlighted line
+        if is_hl:
+            pad_x = 10
+            pad_y = 6
+            rect = [x-pad_x, y-pad_y, x+text_w+pad_x, y+text_h+pad_y]
+            draw.rectangle(rect, fill=(0,0,0,160))
+            # draw the highlighted text with glow
+            for ox, oy in [(-1,0),(1,0),(0,-1),(0,1)]:
+                draw.text((x+ox, y+oy), line, font=f, fill=(0,0,0))
+            draw.text((x, y), line, font=f, fill=(255,230,150))
+        else:
+            # dimmed white text with small outline
+            for ox, oy in [(-1,0),(1,0),(0,-1),(0,1)]:
+                draw.text((x+ox, y+oy), line, font=f, fill=(0,0,0))
+            draw.text((x, y), line, font=f, fill=(220,220,220))
+    return img
