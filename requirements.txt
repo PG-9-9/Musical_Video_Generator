@@ -3,3 +3,11 @@ moviepy
 streamlit
 requests
 pydub
+
+# Music backend
+audiocraft
+soundfile
+
+# Transformers-based MusicGen
+transformers
+

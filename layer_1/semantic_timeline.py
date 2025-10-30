@@ -131,8 +131,48 @@ def generate_semantic_timeline(lyrics: str, layer0_summary: Optional[Dict[str, A
     try:
         segments = json.loads(candidate)
     except Exception as e:
-        # If that fails, surface the raw output for debugging
-        raise ValueError("LLM did not return valid JSON array: " + str(e) + "\nRaw output:\n" + raw)
+        # Best-effort: try to recover JSON objects by brace matching
+        import re
+        objs = re.findall(r"\{[^}]*\}", raw, re.S)
+        if objs:
+            try:
+                candidate2 = "[" + ",".join(objs) + "]"
+                segments = json.loads(candidate2)
+            except Exception:
+                segments = None
+        else:
+            segments = None
+
+        if not segments:
+            # As a robust fallback, don't fail the pipeline: create simple equal segments
+            # by splitting the lyrics. This avoids hard failure when the LLM output is noisy.
+            print("Warning: LLM returned malformed JSON; falling back to deterministic segmentation.")
+            # determine desired segment count
+            min_segments = 3
+            max_segments = 5
+            n = min_segments
+            # try to choose n based on lyric length
+            words = [w for w in lyrics.replace('\n', ' ').split() if w.strip()]
+            if len(words) > 30:
+                n = min(max_segments, max(min_segments, len(words) // 10))
+            # split words into n buckets
+            per = max(1, len(words) // n)
+            segments = []
+            for i in range(n):
+                start = i * per
+                end = None if i == n-1 else (i+1)*per
+                seg_words = words[start:end]
+                seg_text = " ".join(seg_words).strip()
+                seg_emotion = classify_emotion(seg_text).get('label', 'neutral') if seg_text else 'neutral'
+                seg_obj = {
+                    "lines": [seg_text] if seg_text else [],
+                    "emotion": seg_emotion,
+                    "intensity": 0.5,
+                    "color_hex": COLOR_EMOTION_MAP.get(seg_emotion, "#808080"),
+                    "keywords": [w.strip('.,') for w in seg_words[:6]],
+                    "visual_hint": "auto-generated segment"
+                }
+                segments.append(seg_obj)
 
     if not isinstance(segments, list):
         raise ValueError("Expected JSON array of segments")

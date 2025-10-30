@@ -1,7 +1,10 @@
 import os
 from typing import List, Tuple
 
-from moviepy.editor import VideoFileClip, AudioFileClip, ImageClip, CompositeVideoClip
+from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy.audio.io.AudioFileClip import AudioFileClip
+from moviepy.video.VideoClip import ImageClip
+from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 
@@ -51,7 +54,7 @@ def make_subtitle_clips(lyrics: str, duration_sec: int = 10, fontsize: int = 48,
         draw.text((x, y), w, font=font, fill=color)
 
         arr = np.array(img)
-        img_clip = ImageClip(arr).set_position(("center", "bottom")).set_start(t).set_duration(per_word)
+        img_clip = ImageClip(arr).with_position(("center", "bottom")).with_start(t).with_duration(per_word)
         clips.append(img_clip)
         t += per_word
     return clips
@@ -59,13 +62,17 @@ def make_subtitle_clips(lyrics: str, duration_sec: int = 10, fontsize: int = 48,
 
 def compose_video(video_path: str, audio_path: str, lyrics: str, output_path: str = "outputs/final.mp4") -> str:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    video = VideoFileClip(video_path).subclip(0, 10)
-    audio = AudioFileClip(audio_path).subclip(0, 10)
+    video_clip = VideoFileClip(video_path)
+    audio_clip = AudioFileClip(audio_path)
+    # ensure we don't request a subclip longer than the source
+    max_dur = min(10, video_clip.duration if hasattr(video_clip, 'duration') else 10)
+    video = video_clip.subclipped(0, max_dur)
+    audio = audio_clip.subclipped(0, max_dur)
 
     # give subtitles the video width so rendered text centers correctly
     subtitles = make_subtitle_clips(lyrics, duration_sec=10, video_width=video.w)
     layers = [video] + subtitles
     final = CompositeVideoClip(layers)
-    final = final.set_audio(audio)
+    final = final.with_audio(audio)
     final.write_videofile(output_path, fps=24)
     return output_path
