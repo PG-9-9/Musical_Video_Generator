@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional
 
 from layer_0 import load_config
 from layer_0 import gemini_utils as _gutils
+from .emotion_classifier import classify_emotion
 
 # Controlled vocabulary for emotions
 CONTROLLED_EMOTIONS = ["calm", "sad", "dark", "romantic", "hopeful", "energetic", "euphoric", "neutral"]
@@ -21,28 +22,8 @@ COLOR_EMOTION_MAP = {
 }
 
 
-def _local_emotion_classifier(text: str) -> str:
-    """Lightweight keyword-based emotion classifier used for verification.
 
-    This is intentionally small and local for stability; in production this
-    should be replaced with a DistilBERT-Emotion or similar classifier.
-    """
-    t = text.lower()
-    if any(w in t for w in ["love", "romance", "heart"]):
-        return "romantic"
-    if any(w in t for w in ["hope", "dream", "aspir"]):
-        return "hopeful"
-    if any(w in t for w in ["dance", "run", "drive", "energy", "rush"]):
-        return "energetic"
-    if any(w in t for w in ["happy", "joy", "euphor"]):
-        return "euphoric"
-    if any(w in t for w in ["sad", "tears", "cry", "lonely", "melanch"]):
-        return "sad"
-    if any(w in t for w in ["dark", "shadow", "nightmare"]):
-        return "dark"
-    if any(w in t for w in ["calm", "quiet", "gentle", "soft"]):
-        return "calm"
-    return "neutral"
+# Note: local fallback remains available via emotion_classifier when HF is not present.
 
 
 def _call_llm_for_segments(api_key: str, prompt: str) -> str:
@@ -177,8 +158,9 @@ def generate_semantic_timeline(lyrics: str, layer0_summary: Optional[Dict[str, A
 
         emotion = str(seg.get("emotion", "neutral")).lower()
         if emotion not in CONTROLLED_EMOTIONS:
-            # try to map loosely
-            emotion = _local_emotion_classifier(" ".join(lines_list))
+            # use the classifier adapter (HF pipeline if present, otherwise keyword fallback)
+            pred = classify_emotion(" ".join(lines_list))
+            emotion = pred.get("label", "neutral")
         s["emotion"] = emotion
 
         intensity = seg.get("intensity", seg.get("emotional_intensity", 0.5))
@@ -207,11 +189,17 @@ def generate_semantic_timeline(lyrics: str, layer0_summary: Optional[Dict[str, A
     # Emotion verification & blending
     for s in cleaned:
         joined = " ".join(s.get("lines", []))
-        predicted = _local_emotion_classifier(joined)
+        pred = classify_emotion(joined)
+        predicted = pred.get("label", "neutral")
+        score = float(pred.get("score", 0.0)) if pred else 0.0
+        # If HF used and confidence is high, trust it. Otherwise only reduce intensity a bit.
         if predicted != s["emotion"]:
-            # favor LLM label but reduce intensity due to classifier uncertainty
             s["verified"] = False
-            s["intensity"] = max(0.0, s["intensity"] - 0.2)
+            # if classifier was confident, more strongly correct intensity
+            if score >= 0.7:
+                s["intensity"] = max(0.0, s["intensity"] - 0.35)
+            else:
+                s["intensity"] = max(0.0, s["intensity"] - 0.15)
         else:
             s["verified"] = True
 
