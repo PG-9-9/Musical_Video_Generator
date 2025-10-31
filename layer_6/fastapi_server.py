@@ -12,6 +12,7 @@ import time
 import json
 from typing import Dict
 from fastapi.middleware.cors import CORSMiddleware
+import shutil
 
 app = FastAPI(title="MVG Job Server")
 
@@ -143,6 +144,12 @@ def _run_process_and_watch(jobid, cmd):
     info = jobs[jobid]
     info['status'] = 'running'
     info['pid'] = None
+    # mark initial progress so UI sees an update immediately
+    try:
+        info['progress'] = 1
+        info['stage'] = 'starting'
+    except Exception:
+        pass
     _write_job(jobid, info)
     with open(log_path, 'w', encoding='utf-8') as lf:
         try:
@@ -150,26 +157,102 @@ def _run_process_and_watch(jobid, cmd):
             info['pid'] = proc.pid
             _write_job(jobid, info)
             # while running, also poll for a per-job progress file written by runners
-            progress_path = os.path.join('outputs', f'progress_{info.get("job","unknown")}.json')
+            job_progress_path = os.path.join('outputs', 'jobs', f'{jobid}.progress.json')
+            legacy_progress_path = os.path.join('outputs', f'progress_{info.get("job","unknown")}.json')
+            last_seen_pct = info.get('progress')
+            last_seen_time = time.time()
             while proc.poll() is None:
-                # check for a progress file and update job info
-                try:
-                    if os.path.exists(progress_path):
-                        with open(progress_path, 'r', encoding='utf-8') as pf:
-                            try:
-                                pj = json.load(pf)
-                                # pj may contain {pct: int, stage: str}
-                                if isinstance(pj, dict):
-                                    info['progress'] = pj.get('pct')
-                                    info['stage'] = pj.get('stage')
-                                    _write_job(jobid, info)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+                # prefer job-scoped progress file, fall back to legacy progress_{job}.json
+                updated = False
+                for progress_path in (job_progress_path, legacy_progress_path):
+                    try:
+                        if os.path.exists(progress_path):
+                            with open(progress_path, 'r', encoding='utf-8') as pf:
+                                try:
+                                    pj = json.load(pf)
+                                except Exception:
+                                    pj = None
+                            if isinstance(pj, dict):
+                                # support either 'pct' or 'progress' as the numeric key
+                                pct = pj.get('pct') if pj.get('pct') is not None else pj.get('progress')
+                                try:
+                                    if pct is not None:
+                                        pct_int = int(pct)
+                                        if pct_int != info.get('progress'):
+                                            info['progress'] = pct_int
+                                            last_seen_pct = pct_int
+                                            last_seen_time = time.time()
+                                            updated = True
+                                except Exception:
+                                    # leave progress unchanged if parsing fails
+                                    pass
+                                # stage/key may be present under various names
+                                new_stage = pj.get('stage') or pj.get('status')
+                                if new_stage:
+                                    info['stage'] = new_stage
+                                _write_job(jobid, info)
+                                # once we've read the most-preferred file, break to sleep
+                                break
+                    except Exception:
+                        # ignore file read issues and try next path
+                        pass
+
+                # if we haven't seen an update in 12s, emit a light heartbeat so UI shows activity
+                if not updated and (time.time() - last_seen_time) > 12:
+                    try:
+                        cur = int(info.get('progress') or 0)
+                        # gently nudge progress forward but never exceed 95 before finish
+                        if cur < 95:
+                            info['progress'] = min(95, cur + 1)
+                            info['stage'] = (info.get('stage') or 'generating') + ' (heartbeat)'
+                            _write_job(jobid, info)
+                            last_seen_time = time.time()
+                    except Exception:
+                        pass
+
                 time.sleep(0.5)
             info['returncode'] = proc.returncode
             info['status'] = 'finished' if proc.returncode == 0 else 'error'
+            # ensure progress is set to 100 on process completion so UI finishes the bar
+            try:
+                info['progress'] = 100
+            except Exception:
+                pass
+            # After the runner completes, attempt to ensure a companion audio (.wav) exists
+            # for any final MP4s (so the dashboard can surface a dedicated audio player).
+            try:
+                # look for final-like files in outputs
+                out_root = 'outputs'
+                candidates = []
+                for fn in os.listdir(out_root) if os.path.isdir(out_root) else []:
+                    if fn.lower().endswith('.mp4') and ('final' in fn.lower() or 'with_audio' in fn.lower()):
+                        candidates.append(os.path.join(out_root, fn))
+                for mp4 in candidates:
+                    try:
+                        base = os.path.splitext(os.path.basename(mp4))[0]
+                        wav_path = os.path.join(out_root, f"{base}.wav")
+                        # if WAV already exists and non-empty, skip
+                        if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
+                            continue
+                        # prefer ffmpeg if available
+                        ff = shutil.which('ffmpeg')
+                        if ff:
+                            # extract audio to WAV (PCM 16-bit) for broad browser support
+                            subprocess.run([ff, '-y', '-i', mp4, '-vn', '-acodec', 'pcm_s16le', '-ar', '32000', '-ac', '1', wav_path], check=True)
+                        else:
+                            # fallback to moviepy if installed in environment
+                            try:
+                                from moviepy.editor import VideoFileClip
+                                with VideoFileClip(mp4) as clip:
+                                    if clip.audio:
+                                        clip.audio.write_audiofile(wav_path, fps=32000)
+                            except Exception:
+                                # if this fails, just continue silently; dashboard will still try video element
+                                pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         except Exception as e:
             info['status'] = 'error'
             with open(log_path, 'a', encoding='utf-8') as lf2:
@@ -189,6 +272,8 @@ def start_job(req: StartRequest):
         'id': jobid,
         'job': job,
         'status': 'queued',
+        'progress': 0,
+        'stage': 'queued',
         'created_at': time.time(),
         'args': req.args,
         'log_path': log_path,
@@ -216,6 +301,9 @@ def start_job(req: StartRequest):
         # Only pass runner args to the smaller per-step scripts; don't append to main.py (full pipeline)
         if req.args and job != 'full':
             cmd.append(json.dumps(req.args))
+        # Also pass the jobid as the final argument so runners can write job-scoped progress
+        if job != 'full':
+            cmd.append(jobid)
     except Exception:
         pass
 
@@ -251,6 +339,15 @@ def get_logs(jobid: str, tail: int = 200):
 
 @app.get('/jobs/{jobid}')
 def get_job(jobid: str):
+    # Prefer returning the on-disk job file which reflects the latest writes.
+    job_file = os.path.join(JOBS_DIR, f"{jobid}.json")
+    if os.path.exists(job_file):
+        try:
+            with open(job_file, 'r', encoding='utf-8') as jf:
+                info = json.load(jf)
+                return info
+        except Exception:
+            pass
     info = jobs.get(jobid)
     if not info:
         raise HTTPException(status_code=404, detail='Job not found')

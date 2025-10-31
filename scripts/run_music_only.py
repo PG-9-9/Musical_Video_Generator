@@ -39,11 +39,21 @@ def main():
         print("Failed to load config.json:", e)
         return
     runner_args = _parse_args()
+    # optional jobid passed as second CLI arg (for server-run jobs)
+    jobid = None
+    try:
+        if len(sys.argv) > 2:
+            jobid = sys.argv[2]
+    except Exception:
+        jobid = None
     try:
         # emit starting progress
         try:
             os.makedirs('outputs', exist_ok=True)
-            with open('outputs/progress_music.json', 'w', encoding='utf-8') as pf:
+            # write job-scoped progress if jobid provided, otherwise fallback to legacy path
+            progress_path = os.path.join('outputs', 'jobs', f'{jobid}.progress.json') if jobid else 'outputs/progress_music.json'
+            os.makedirs(os.path.dirname(progress_path), exist_ok=True)
+            with open(progress_path, 'w', encoding='utf-8') as pf:
                 json.dump({'pct': 5, 'stage': 'starting'}, pf)
         except Exception:
             pass
@@ -53,7 +63,8 @@ def main():
         gem = analyze_lyrics(lyrics, "config.json")
         print("Gemini result summary:", json.dumps(gem, indent=2)[:1000])
         try:
-            with open('outputs/progress_music.json', 'w', encoding='utf-8') as pf:
+            progress_path = os.path.join('outputs', 'jobs', f'{jobid}.progress.json') if jobid else 'outputs/progress_music.json'
+            with open(progress_path, 'w', encoding='utf-8') as pf:
                 json.dump({'pct': 15, 'stage': 'analyzed'}, pf)
         except Exception:
             pass
@@ -72,11 +83,20 @@ def main():
         tempo_hint = None
 
     out_path = runner_args.get('output_path', 'outputs/music_gen_test.wav')
+    # limit duration to at most 10 seconds to keep preview clips small
     duration = runner_args.get('duration_sec', 6)
+    try:
+        duration = float(duration)
+    except Exception:
+        duration = 6.0
+    if duration > 10.0:
+        print(f"Requested duration {duration}s exceeds 10s cap — capping to 10s.")
+        duration = 10.0
     try:
         print("Calling generate_music_from_prompt(...) with prompt:\n", music_prompt)
         try:
-            with open('outputs/progress_music.json', 'w', encoding='utf-8') as pf:
+            progress_path = os.path.join('outputs', 'jobs', f'{jobid}.progress.json') if jobid else 'outputs/progress_music.json'
+            with open(progress_path, 'w', encoding='utf-8') as pf:
                 json.dump({'pct': 30, 'stage': 'generating'}, pf)
         except Exception:
             pass
@@ -93,7 +113,8 @@ def main():
         if os.path.exists(music):
             print("SUCCESS: music file written to:", music)
             try:
-                with open('outputs/progress_music.json', 'w', encoding='utf-8') as pf:
+                progress_path = os.path.join('outputs', 'jobs', f'{jobid}.progress.json') if jobid else 'outputs/progress_music.json'
+                with open(progress_path, 'w', encoding='utf-8') as pf:
                     json.dump({'pct': 100, 'stage': 'done'}, pf)
             except Exception:
                 pass

@@ -45,7 +45,8 @@ async function updateOutputs(){
       return mp4s.length? mp4s[0] : null;
     }
     function chooseFinal(){
-      const prefer = ['styled_final.mp4','final_with_audio.mp4','final.mp4'];
+      // Prefer the final_with_audio (lyric video) when available, then styled_final, then final
+      const prefer = ['final_with_audio.mp4','styled_final.mp4','final.mp4'];
       for(let p of prefer){ if(mp4s.includes(p)) return p; }
       return mp4s.length? mp4s[mp4s.length-1] : null;
     }
@@ -76,7 +77,17 @@ async function updateOutputs(){
     }
 
     if(finalFile){
-      const v = document.createElement('video'); v.src = `/outputs/${finalFile}`; v.controls = true; v.style.width = '100%';
+      // Create a video player for the final file and ensure audio is enabled
+      const v = document.createElement('video');
+      v.src = `/outputs/${finalFile}`;
+      v.controls = true;
+      v.style.width = '100%';
+      // Helpful hints to browsers: play inline, preload, and ensure not muted
+      v.playsInline = true;
+      try{ v.muted = false; }catch(e){}
+      try{ v.volume = 1.0; }catch(e){}
+      v.preload = 'auto';
+      v.crossOrigin = 'anonymous';
       finalEl.appendChild(v);
     } else {
       finalEl.textContent = 'No final video found.';

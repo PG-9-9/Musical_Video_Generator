@@ -51,7 +51,8 @@ def render_segment_clip(seg: Dict[str, Any], beats: List[float], energy_curve: L
 
     effect_fn = EMOTION_TO_EFFECT.get(emotion, effects.gradient_wave)
     state = {
-        "color_rgb": _hex_to_rgb01(color),
+        # allow upstream to provide a direct rgb override in '_color_rgb_override'
+        "color_rgb": seg.get('_color_rgb_override') if seg.get('_color_rgb_override') is not None else _hex_to_rgb01(color),
         "energy": intensity,
         "beats": [b - start for b in beats if b >= start and b < end],
     }
@@ -110,6 +111,46 @@ def generate_animation(semantic_path: str = "outputs/semantic_timeline.json", be
         "neutral": synthwave_palette["cyan"],
     }
 
+    # allow a high-level style override to change palettes
+    style_override = (config.get('style') or '').lower()
+    if style_override == 'synthwave':
+        # already using synthwave defaults
+        pass
+    elif style_override == 'lo-fi' or style_override == 'lofi':
+        # muted, warm tones
+        emotion_color_override = {
+            "calm": _hex_to_rgb01("#6B7280"),
+            "sad": _hex_to_rgb01("#4B5563"),
+            "hopeful": _hex_to_rgb01("#D6A65A"),
+            "energetic": _hex_to_rgb01("#C2410C"),
+            "euphoric": _hex_to_rgb01("#9F7AEA"),
+            "romantic": _hex_to_rgb01("#FCA5A5"),
+            "dark": _hex_to_rgb01("#111827"),
+            "neutral": _hex_to_rgb01("#9CA3AF"),
+        }
+    elif style_override == 'acoustic':
+        emotion_color_override = {
+            "calm": _hex_to_rgb01("#7C3E19"),
+            "sad": _hex_to_rgb01("#5B5B5B"),
+            "hopeful": _hex_to_rgb01("#F59E0B"),
+            "energetic": _hex_to_rgb01("#D97706"),
+            "euphoric": _hex_to_rgb01("#F472B6"),
+            "romantic": _hex_to_rgb01("#FB7185"),
+            "dark": _hex_to_rgb01("#2D2D2D"),
+            "neutral": _hex_to_rgb01("#D1BFA7"),
+        }
+    elif style_override == 'cinematic':
+        emotion_color_override = {
+            "calm": _hex_to_rgb01("#1F2937"),
+            "sad": _hex_to_rgb01("#0F172A"),
+            "hopeful": _hex_to_rgb01("#F59E0B"),
+            "energetic": _hex_to_rgb01("#EF4444"),
+            "euphoric": _hex_to_rgb01("#7C3AED"),
+            "romantic": _hex_to_rgb01("#B91C1C"),
+            "dark": _hex_to_rgb01("#000000"),
+            "neutral": _hex_to_rgb01("#4B5563"),
+        }
+
     # prepare per-segment energy if present
     per_segment_energy = beat.get("per_segment_energy") or []
 
@@ -121,6 +162,11 @@ def generate_animation(semantic_path: str = "outputs/semantic_timeline.json", be
                 seg_energy = float(per_segment_energy[idx])
             except Exception:
                 seg_energy = 1.0
+
+        # inject style color override for segments that don't set color_hex explicitly
+        emo_key = (seg.get('emotion') or 'neutral').lower()
+        if not seg.get('color_hex') and emotion_color_override.get(emo_key) is not None:
+            seg['_color_rgb_override'] = emotion_color_override.get(emo_key)
 
         clip = render_segment_clip(seg, beats, energy_curve, fps, resolution=(w, h))
         # inject style tunables into clip via attribute - MoviePy will not serialize these, but we keep for events

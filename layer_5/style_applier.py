@@ -16,7 +16,7 @@ import numpy as np
 from .style_profiles import STYLE_PROFILES, get_style_profile
 
 
-def build_style_timeline(semantic_timeline: Dict[str, Any], fps: int, duration_sec: float) -> List[Dict[str, Any]]:
+def build_style_timeline(semantic_timeline: Dict[str, Any], fps: int, duration_sec: float, override_style: str = None) -> List[Dict[str, Any]]:
     """Return a list of per-frame style parameter dicts for `int(fps*duration_sec)` frames.
 
     semantic_timeline is expected to be a dict with a 'segments' list where each segment
@@ -36,7 +36,21 @@ def build_style_timeline(semantic_timeline: Dict[str, Any], fps: int, duration_s
     for seg in segments:
         t = seg.get("start_sec", 0.0)
         times.append(t)
-        profile = get_style_profile(seg.get("emotion", "Calm"))
+        # allow an override style token (from the dashboard) that maps to an internal profile
+        profile = None
+        if override_style:
+            mapping = {
+                'synthwave': 'Euphoric',
+                'lo-fi': 'Calm',
+                'lofi': 'Calm',
+                'acoustic': 'Romantic',
+                'cinematic': 'Energetic'
+            }
+            prof_name = mapping.get(str(override_style).lower())
+            if prof_name:
+                profile = get_style_profile(prof_name)
+        if profile is None:
+            profile = get_style_profile(seg.get("emotion", "Calm"))
         # allow semantic timeline to override palette via color_hex
         if seg.get("color_hex"):
             try:
