@@ -5,21 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Musical Video Generator — Dashboard</title>
   <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="icon" href="/static/musical-note.png" type="image/png" />
 </head>
 <body>
   <div id="app">
     <header class="site-header">
-      <h1>Musical Video Generator</h1>
-      <p class="muted">Run pipeline jobs and preview generated assets</p>
+      <img src="/static/musical-note.png" class="header-icon" alt="logo"/>
+      <h1>Lyric-Musical Generator</h1>
     </header>
 
     <section id="controls" class="card">
       <div class="control-row">
         <div class="control-column">
-          <label for="lyrics">Lyrics</label>
-          <textarea id="lyrics" rows="6">In the midnight light, I’m chasing dreams through neon skies.</textarea>
+          <label for="lyrics"><img src="/static/1.png" class="icon" alt="icon"/> Lyrics</label>
+          <textarea id="lyrics" rows="6" placeholder="In the midnight light, I’m chasing dreams through neon skies.">In the midnight light, I’m chasing dreams through neon skies.</textarea>
 
-          <label for="style" style="margin-top:8px">Choose Preferred Style</label>
+          <label for="style" style="margin-top:8px"><img src="/static/2.png" class="icon" alt="icon"/> Choose Preferred Style</label>
           <select id="style">
             <option value="synthwave">synthwave</option>
             <option value="lo-fi">lo-fi</option>
@@ -35,7 +36,7 @@
           </div>
 
           <div id="gemini-inline" style="margin-top:12px">
-            <h4 style="margin:6px 0 8px 0">What Gemini Thinks?</h4>
+            <h4 style="margin:6px 0 8px 0"><img src="/static/3.png" class="icon" alt="icon"/> What Gemini Thinks?</h4>
             <div id="gemini-content" class="note">loading...</div>
           </div>
         </div>
@@ -49,17 +50,17 @@
     <section id="outputs_area">
       <div class="top-row">
         <div id="audio-card" class="media-card card">
-          <h3>Generated Audio</h3>
+          <h3><img src="/static/4.png" class="icon-heading" alt="icon"/> Generated Audio</h3>
           <div class="media-content" id="audio-content">Loading...</div>
         </div>
         <div id="anim-card" class="media-card card">
-          <h3>Generated Animation</h3>
+          <h3><img src="/static/5.png" class="icon-heading" alt="icon"/> Generated Animation</h3>
           <div class="media-content" id="anim-content">Loading...</div>
         </div>
       </div>
 
       <div id="final-card" class="card final-card">
-        <h3>Generated Lyric Video</h3>
+        <h3><img src="/static/6.png" class="icon-heading" alt="icon"/> Generated Lyric Video</h3>
         <div class="media-content" id="final-content">Loading...</div>
       </div>
     </section>

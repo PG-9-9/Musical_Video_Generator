@@ -8,10 +8,11 @@ body{
 	padding: 22px;
 	color: #111;
 }
-.site-header{margin-bottom:12px}
-.site-header h1{margin:0;font-size:20px;color: rgb(121, 76, 217)}
+.site-header{display:flex;flex-direction:row;align-items:center;justify-content:center;gap:12px;margin-bottom:12px}
+.site-header h1{margin:0;font-size:28px;color: rgb(121, 76, 217);text-align:center;font-weight:700}
 .site-header .muted{margin:2px 0 0;color:var(--muted);font-size:13px}
-.card{background:var(--card);padding:12px;border-radius:10px;box-shadow:0 4px 14px rgba(30,35,70,0.06), 0 8px 24px rgba(221,104,95,0.06);margin-bottom:12px}
+.header-icon{width:34px;height:34px}
+.card{background:var(--card);padding:12px;border-radius:10px;box-shadow:0 12px 30px rgba(221,104,95,0.18), 0 4px 12px rgba(221,104,95,0.08), 0 2px 6px rgba(0,0,0,0.06);margin-bottom:12px}
 #controls textarea{width:100%;border:1px solid #e6e9f1;padding:8px;border-radius:6px}
 .control-row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start}
 .control-column{flex:1;min-width:200px;display:flex;flex-direction:column}
@@ -24,10 +25,40 @@ body{
 
 #outputs_area{display:block}
 .top-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
-.media-card h3{margin:0 0 8px 0;font-size:15px}
+.media-card h3{margin:0 0 8px 0;font-size:18px;text-align:center;color: rgb(121, 76, 217);font-weight:700}
 .media-content{min-height:140px;display:flex;align-items:center;justify-content:center}
 .media-content video,.media-content audio{max-width:100%;max-height:360px;border-radius:8px}
 .final-card{padding:16px}
 .final-card .media-content{min-height:360px}
+
+/* control labels and small headings */
+/* control labels and small headings */
+#controls label, #controls h4{color: rgb(121, 76, 217);font-weight:700;font-size:16px;margin-bottom:6px;text-align:center;display:block;width:100%}
+#lyrics{color: rgb(121, 76, 217);font-weight:600;font-size:15px;text-align:center;line-height:1.45}
+#lyrics::placeholder{color: rgb(121, 76, 217);opacity:0.85;text-align:center}
+
+/* Gemini content box (text under "What Gemini Thinks?") */
+#gemini-content{color: rgb(121, 76, 217);font-weight:600;font-size:15px;text-align:center;line-height:1.4;padding:10px;border-radius:8px;background:rgba(209,177,196,0.04);max-width:760px;margin:6px auto}
+
+
+/* style dropdown */
+#style{appearance:none;padding:10px 12px;border-radius:10px;border:1px solid #e6e9f1;background:linear-gradient(180deg,#fff,#f8f9ff);box-shadow:inset 0 1px 0 rgba(255,255,255,0.6);width:100%;max-width:360px;margin:8px auto;display:block}
+
+.final-card h3{color: rgb(121, 76, 217);text-align:center;font-weight:700}
+
+/* icons next to labels and headings */
+.icon{width:18px;height:18px;vertical-align:middle;margin-right:8px}
+.icon-heading{width:20px;height:20px;vertical-align:middle;margin-right:8px}
+
+/* progress bar color */
+progress.prog::-webkit-progress-value{background: rgb(121, 76, 217)}
+progress.prog::-moz-progress-bar{background: rgb(121, 76, 217)}
+progress.prog{background: linear-gradient(90deg, rgba(121,76,217,0.08), rgba(121,76,217,0.03));}
+
+/* heading background tint for 3D look */
+.media-card h3, .final-card h3{display:inline-block;padding:8px 12px;border-radius:10px;background: rgba(221,104,95,0.04)}
+
+/* ensure uniform heading size */
+.media-card h3, .final-card h3{font-size:16px}
 
 pre{background:#0b0b0b;color:#eee;padding:8px;border-radius:6px}

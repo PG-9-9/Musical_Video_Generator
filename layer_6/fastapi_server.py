@@ -78,9 +78,15 @@ def list_outputs():
     return JSONResponse({"files": sorted(files)})
 
 
+from fastapi.responses import FileResponse
+
+
 @app.get('/favicon.ico')
 def favicon():
-    # Return no-content for favicon requests to avoid 404 noise in logs
+    # Serve the musical-note.png from the static folder as favicon if present
+    p = os.path.join(static_dir, 'musical-note.png')
+    if os.path.exists(p):
+        return FileResponse(p, media_type='image/png')
     return Response(status_code=204)
 
 
