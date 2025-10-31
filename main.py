@@ -8,7 +8,7 @@ from layer_3 import generate_animation
 from layer_5.style_profiles import STYLE_PROFILES
 from layer_5.style_applier import build_style_timeline, apply_styles_to_frames
 from layer_4.orchestrator import orchestrate_final
-# Robust MoviePy imports to support multiple layouts
+# MoviePy imports (try multiple locations)
 VideoFileClip = None
 AudioFileClip = None
 try:
@@ -45,7 +45,7 @@ def main():
     print("Semantic timeline written to outputs/semantic_timeline.json")
 
     print("[3/6] Generating music placeholder...")
-    # Build optional tempo/style hint from Gemini output if present
+    # Build tempo hint from Gemini output if present
     tempo_hint = None
     try:
         bpm = gemini_out.get('recommended_bpm')
@@ -69,7 +69,7 @@ def main():
     print("[6/6] Composing final video...")
     final_path = compose_video(video_path, music_path, lyrics, output_path="outputs/final.mp4")
 
-    # Write a combined pipeline outputs file for convenience
+    # Write pipeline outputs metadata
     pipeline_out = {
         "lyrics": lyrics,
         "gemini": gemini_out,
@@ -86,7 +86,7 @@ def main():
     print("Done. Final video at:", final_path)
     print("Pipeline metadata written to outputs/pipeline_outputs.json")
 
-    # Run Layer 3 animator to produce animated.mp4 and events JSON.
+    # Run Layer 3 animator to produce animated.mp4 and events JSON
     try:
         print("[7/9] Running Layer 3 animator to produce animated.mp4...")
         anim_cfg = {"resolution": [640, 360], "fps": 24, "crossfade_sec": 0.5, "style": "synthwave"}
@@ -102,7 +102,7 @@ def main():
         print("Layer 3 animator failed:", e)
         return
 
-    # ---- Layer 5: Adaptive styling ----
+    # Layer 5: Adaptive styling
     try:
         print("[8/9] Building style timeline from semantic_timeline.json...")
         with open("outputs/semantic_timeline.json", 'r', encoding='utf-8') as f:
@@ -112,7 +112,7 @@ def main():
         fps = 24
         style_tl = build_style_timeline(sem, fps=fps, duration_sec=duration)
 
-        print("[9/9] Extracting frames from animated.mp4 and applying styles (this may take a moment)...")
+        print("[9/9] Extracting frames and applying styles...")
         clip = VideoFileClip(pipeline_out.get('animated_path', 'outputs/animated.mp4'))
         frames = []
         # sample at clip.fps or target fps
@@ -124,7 +124,7 @@ def main():
             pil = Image.fromarray(frame.astype('uint8'))
             frames.append(pil)
 
-        # build a beat_curve from beat_analysis.json (energy_curve)
+        # build beat curve from beat_analysis.json
         with open("outputs/beat_analysis.json", 'r', encoding='utf-8') as f:
             beat = json.load(f)
         energy = beat.get('energy_curve', [])
@@ -142,7 +142,7 @@ def main():
         with open("outputs/pipeline_outputs.json", "w", encoding="utf-8") as f:
             json.dump(pipeline_out, f, indent=2)
 
-        # Layer 4: attach audio and finalize (try MoviePy -> ffmpeg -> orchestrator)
+    # Layer 4: attach audio and finalize (MoviePy -> ffmpeg -> orchestrator)
         muxed_path = "outputs/final_with_audio.mp4"
         attached = False
         # Try MoviePy attach first (we used MoviePy earlier for video writing)
@@ -171,7 +171,7 @@ def main():
             pipeline_out['final_with_audio'] = muxed_path
             attached = True
         except Exception:
-            # MoviePy attach failed; try ffmpeg mux
+            # MoviePy attach failed; try ffmpeg
             try:
                 import shutil, subprocess
                 ffmpeg = shutil.which('ffmpeg') or shutil.which('ffmpeg.exe')
@@ -187,7 +187,7 @@ def main():
                     pipeline_out['final_with_audio'] = muxed_path
                     attached = True
             except Exception:
-                # ffmpeg mux failed or not available; use orchestrator as last resort
+                # ffmpeg failed; use orchestrator as last resort
                 try:
                     out = orchestrate_final(styled_path, music_path, lyrics, "outputs/semantic_timeline.json", "outputs/beat_analysis.json", output_path=muxed_path)
                     pipeline_out['final_with_audio'] = out.get('output_path')

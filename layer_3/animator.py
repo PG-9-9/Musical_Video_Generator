@@ -1,6 +1,6 @@
-"""Layer 3 animator: reads semantic timeline + beat analysis and produces animated.mp4
+"""Layer 3 animator: produce animated.mp4 from semantic timeline + beat analysis.
 
-Produces optional events JSON for debugging.
+Writes an events JSON summary for debugging.
 """
 import json
 import os
@@ -51,13 +51,13 @@ def render_segment_clip(seg: Dict[str, Any], beats: List[float], energy_curve: L
 
     effect_fn = EMOTION_TO_EFFECT.get(emotion, effects.gradient_wave)
     state = {
-        # allow upstream to provide a direct rgb override in '_color_rgb_override'
+        # allow upstream override via '_color_rgb_override'
         "color_rgb": seg.get('_color_rgb_override') if seg.get('_color_rgb_override') is not None else _hex_to_rgb01(color),
         "energy": intensity,
         "beats": [b - start for b in beats if b >= start and b < end],
     }
 
-    # make_frame uses local t starting at 0 for the segment
+    # make_frame uses local t starting at 0
     def make_frame(t):
         frame = effect_fn(state, t, w, h)
         # apply a global vignette based on energy
@@ -66,7 +66,7 @@ def render_segment_clip(seg: Dict[str, Any], beats: List[float], energy_curve: L
         frame = np.clip(frame * 255.0, 0, 255).astype('uint8')
         return frame
 
-    # newer moviepy versions use with_fps instead of set_fps
+    # use with_fps on newer moviepy
     clip = VideoClip(make_frame, duration=duration).with_fps(fps)
     return clip
 
@@ -111,7 +111,7 @@ def generate_animation(semantic_path: str = "outputs/semantic_timeline.json", be
         "neutral": synthwave_palette["cyan"],
     }
 
-    # allow a high-level style override to change palettes
+    # high-level style override for palettes
     style_override = (config.get('style') or '').lower()
     if style_override == 'synthwave':
         # already using synthwave defaults
@@ -151,11 +151,11 @@ def generate_animation(semantic_path: str = "outputs/semantic_timeline.json", be
             "neutral": _hex_to_rgb01("#4B5563"),
         }
 
-    # prepare per-segment energy if present
+    # per-segment energy if present
     per_segment_energy = beat.get("per_segment_energy") or []
 
     for idx, seg in enumerate(segments):
-        # tune state for synthwave style
+    # tune state for segment
         seg_energy = 1.0
         if idx < len(per_segment_energy):
             try:
@@ -163,13 +163,13 @@ def generate_animation(semantic_path: str = "outputs/semantic_timeline.json", be
             except Exception:
                 seg_energy = 1.0
 
-        # inject style color override for segments that don't set color_hex explicitly
+        # inject color override when color_hex missing
         emo_key = (seg.get('emotion') or 'neutral').lower()
         if not seg.get('color_hex') and emotion_color_override.get(emo_key) is not None:
             seg['_color_rgb_override'] = emotion_color_override.get(emo_key)
 
         clip = render_segment_clip(seg, beats, energy_curve, fps, resolution=(w, h))
-        # inject style tunables into clip via attribute - MoviePy will not serialize these, but we keep for events
+    # attach metadata for debugging/events
         clip._layer3_meta = {
             "emotion": seg.get('emotion'),
             "start": seg.get('start_sec'),
@@ -179,7 +179,7 @@ def generate_animation(semantic_path: str = "outputs/semantic_timeline.json", be
         clips.append(clip)
         events.append({"segment": seg.get('emotion'), "start": seg.get('start_sec'), "end": seg.get('end_sec')})
 
-    # compute deterministic per-frame events (beats, triggers) for debugging
+    # compute per-frame events (beats/triggers) for debugging
     fps_int = fps
     frame_events = []
     beat_tolerance = 0.045
@@ -201,8 +201,7 @@ def generate_animation(semantic_path: str = "outputs/semantic_timeline.json", be
 
     # apply crossfade transitions
     crossfade_sec = float(config.get('crossfade_sec', 0.5))
-    # crossfade behavior varies between moviepy versions; if crossfade is requested but
-    # the clip API does not support crossfadein, fall back to simple concatenation.
+    # apply crossfade if supported, else concatenate
     if crossfade_sec > 0 and len(clips) > 1:
         # try to use crossfadein where available
         try:

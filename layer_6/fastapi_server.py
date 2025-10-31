@@ -16,7 +16,7 @@ import shutil
 
 app = FastAPI(title="MVG Job Server")
 
-# Allow cross-origin requests from Streamlit/dev UI
+# CORS for UI/dev
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -30,13 +30,13 @@ app.add_middleware(
 def read_root():
     return {"status": "ok", "endpoints": ["/start", "/jobs", "/jobs/{jobid}", "/jobs/{jobid}/logs"]}
 
-# Mount static assets and outputs for easy browsing
+# Mount templates, static and outputs for browsing
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), 'templates'))
 static_dir = os.path.join(os.path.dirname(__file__), 'static')
 if os.path.isdir(static_dir):
     app.mount('/static', StaticFiles(directory=static_dir), name='static')
 
-# serve outputs folder directly for playback/download
+# serve outputs for playback/download
 app.mount('/outputs', StaticFiles(directory='outputs'), name='outputs')
 
 
@@ -50,7 +50,7 @@ def list_outputs():
     root = 'outputs'
     if not os.path.isdir(root):
         return JSONResponse({"files": []})
-    # Only return media files that are useful for the dashboard (avoid logs, temp files, etc.)
+    # List media outputs for the dashboard
     allowed_exts = {'.mp4', '.webm', '.wav', '.mp3', '.ogg'}
     files = []
     for dirpath, dirnames, filenames in os.walk(root):
@@ -84,7 +84,7 @@ from fastapi.responses import FileResponse
 
 @app.get('/favicon.ico')
 def favicon():
-    # Serve the musical-note.png from the static folder as favicon if present
+    # Serve musical-note.png from static as favicon if present
     p = os.path.join(static_dir, 'musical-note.png')
     if os.path.exists(p):
         return FileResponse(p, media_type='image/png')
@@ -144,7 +144,7 @@ def _run_process_and_watch(jobid, cmd):
     info = jobs[jobid]
     info['status'] = 'running'
     info['pid'] = None
-    # mark initial progress so UI sees an update immediately
+    # mark initial progress for UI
     try:
         info['progress'] = 1
         info['stage'] = 'starting'
@@ -156,13 +156,13 @@ def _run_process_and_watch(jobid, cmd):
             proc = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, text=True)
             info['pid'] = proc.pid
             _write_job(jobid, info)
-            # while running, also poll for a per-job progress file written by runners
+            # while running, poll job-scoped or legacy progress files
             job_progress_path = os.path.join('outputs', 'jobs', f'{jobid}.progress.json')
             legacy_progress_path = os.path.join('outputs', f'progress_{info.get("job","unknown")}.json')
             last_seen_pct = info.get('progress')
             last_seen_time = time.time()
             while proc.poll() is None:
-                # prefer job-scoped progress file, fall back to legacy progress_{job}.json
+                # prefer job-scoped progress file, fallback to legacy
                 updated = False
                 for progress_path in (job_progress_path, legacy_progress_path):
                     try:
@@ -186,7 +186,7 @@ def _run_process_and_watch(jobid, cmd):
                                 except Exception:
                                     # leave progress unchanged if parsing fails
                                     pass
-                                # stage/key may be present under various names
+                                # update stage if present
                                 new_stage = pj.get('stage') or pj.get('status')
                                 if new_stage:
                                     info['stage'] = new_stage
@@ -197,7 +197,7 @@ def _run_process_and_watch(jobid, cmd):
                         # ignore file read issues and try next path
                         pass
 
-                # if we haven't seen an update in 12s, emit a light heartbeat so UI shows activity
+                # if no update in 12s, emit a heartbeat so UI shows activity
                 if not updated and (time.time() - last_seen_time) > 12:
                     try:
                         cur = int(info.get('progress') or 0)
@@ -213,13 +213,12 @@ def _run_process_and_watch(jobid, cmd):
                 time.sleep(0.5)
             info['returncode'] = proc.returncode
             info['status'] = 'finished' if proc.returncode == 0 else 'error'
-            # ensure progress is set to 100 on process completion so UI finishes the bar
+            # set progress to 100 on completion
             try:
                 info['progress'] = 100
             except Exception:
                 pass
-            # After the runner completes, attempt to ensure a companion audio (.wav) exists
-            # for any final MP4s (so the dashboard can surface a dedicated audio player).
+            # After completion, try to extract companion WAVs for final MP4s
             try:
                 # look for final-like files in outputs
                 out_root = 'outputs'
@@ -231,7 +230,7 @@ def _run_process_and_watch(jobid, cmd):
                     try:
                         base = os.path.splitext(os.path.basename(mp4))[0]
                         wav_path = os.path.join(out_root, f"{base}.wav")
-                        # if WAV already exists and non-empty, skip
+                        # skip if WAV already exists
                         if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
                             continue
                         # prefer ffmpeg if available

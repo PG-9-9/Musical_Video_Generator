@@ -18,10 +18,5 @@ Inputs & outputs
 Style mapping and override
 - I added `override_style` support so a UI token like `synthwave` maps to an internal profile (e.g., `Euphoric`) and is applied uniformly or per-segment depending on the mapping.
 - The style applier uses `dominant_emotion` and `emotion_intensity` as hints to bias palette selection and effect strength.
-
-What I changed
 - Rewrote `run_style_only.py` to prefer reading extracted frames from `outputs/frames/` (Layer 4). If frames are absent, the runner falls back to extracting frames from `outputs/animated.mp4` itself.
-- The runner writes progress updates (10/20/50/100) and honors the `style` override passed from the UI.
 
-Practical notes
-- Styling can be CPU-bound depending on the effects; previews (`layer5_preview.mp4`) are helpful before composing the full final MP4.
