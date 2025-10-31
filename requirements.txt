@@ -11,3 +11,11 @@ soundfile
 # Transformers-based MusicGen
 transformers
 
+
+librosa
+matplotlib
+plotly
+fastapi
+uvicorn
+requests
+

@@ -7,4 +7,5 @@ config.json
 outputs/
 .vscode/
 __pycache__/
+shortcuts.txt
 
