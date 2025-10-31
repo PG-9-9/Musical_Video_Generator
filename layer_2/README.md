@@ -5,7 +5,7 @@ Purpose
 
 Key files
 - `scripts/run_music_only.py` — runner that calls the music generation code and writes progress. It caps duration to 10 seconds by default.
-- `music_gen.py` — model wrapper that tries to use MusicGen/transformers; can fall back to placeholder or other model integration depending on environment.
+- `music_gen.py` — model wrapper that tries to use MusicGen/transformers
 - `beat_analysis.py` — analyzes WAV files to produce beat times and a tempo estimate.
 
 Inputs & outputs
@@ -17,8 +17,4 @@ Inputs & outputs
 Implementation notes
 - `run_music_only.py` accepts a JSON args string and a jobid; when jobid is passed it writes per-job progress to `outputs/jobs/{jobid}.progress.json` so the server can mirror progress.
 - Music generation will prefer GPU if code runs under a CUDA-enabled interpreter. If GPU is absent, generation falls back to CPU (much slower).
-- The runner enforces a hard cap of 10s to keep iteration fast; you can change that cap in the script.
-
-Troubleshooting
-- If generation is very slow, ensure the FastAPI server and runners are started from a GPU-enabled Conda env (example: `musical_v_new`).
-- If the audio file exists but the UI shows no audio, check the server-side audio extraction (ffmpeg) or open the WAV directly.
+- If generation is very slow, ensure the FastAPI server and runners are started from a GPU-enabled Conda env 

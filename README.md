@@ -103,8 +103,7 @@ Note: the scripts accept a JSON args string followed by the jobid so they can wr
 3. If audio isn't playing in-browser, open `outputs/final_with_audio.wav` directly in a new tab or local player.
 4. Ensure FastAPI server was started from a Conda env that has GPU access if you expect fast model runs.
 
-## Final notes
+## Final notes :)
 
-I kept the pipeline intentionally modular so you can run, inspect, and iterate on individual layers. If you want, I can:
-
+I kept the pipeline intentionally modular so you can run, inspect, and iterate on individual layers.
 
