@@ -1,9 +1,7 @@
-(The file `f:\Projects\Musical_Video_Generator\README.md` exists, but is empty)
 ## Musical Video Generator — README
 
 I built this project to turn short lyrics into a compact, shareable lyric video — with music, a semantic timeline, animated frames, and a final styled video you can play in a browser. I’ll walk you through how the repo is organized, how each layer contributes to the final output, and the practical commands I use to run and troubleshoot the pipeline.
 
-This README is written in plain language. If you want a deeper technical dive, tell me which part and I’ll expand it.
 
 ## Quick summary
 
@@ -11,9 +9,9 @@ This README is written in plain language. If you want a deeper technical dive, t
 - Output: a final MP4 (usually `final_with_audio.mp4` or `final.mp4`) plus helper files under `outputs/`.
 - How it runs: a layered pipeline (L0..L5) performs music, beat analysis, animation, styling and composition. Layer 6 is a small FastAPI dashboard I use to start jobs and view outputs.
 
-## Project layout (what I changed and why)
+## Project layout
 
-Top-level files you’ll care about:
+Top-level files:
 
 - `main.py` — runs the full pipeline end-to-end.
 - `app.py`, `composer.py`, `music_gen.py`, `video_gen.py`, `gemini_utils.py` — low-level helpers and model wrappers.
@@ -22,20 +20,20 @@ Top-level files you’ll care about:
 - `layer_6/fastapi_server.py` and `layer_6/static/` — the job server and the small dashboard UI.
 - `outputs/` — everything the pipeline writes: audio, video, progress files and job metadata.
 
-## The layers — how they build the final video
+## The layers 
 
 I organized the pipeline in layers so each step is clear and testable. Here’s the role I gave each layer and what to watch for.
 
 L0 — Media & Model helpers
-- What I do here: wrap low-level model code and media I/O. This includes MusicGen/transformer model wrappers, safe audio write paths, and robust reads/writes for MoviePy or imageio.
-- Why it matters: model libraries and media backends change often. I added defensive code so the repo works across environments and falls back sensibly when some features are missing.
+- What I do here: wrap low-level model code and media I/O. This includes MusicGen/transformer model wrappers, safe audio write paths, and reads/writes for MoviePy or imageio.
+- Why it matters: model libraries and media backends change often. I added defensive code so the repo works across environments and falls back when some features are missing.
 
 L1 — Semantic timeline
 - What I do here: analyze the lyrics and produce a short semantic timeline and prompts. This is where I call the Gemini/analysis utility to extract mood, color palette, tempo suggestions, and a short scene prompt.
 - Output: `outputs/semantic_timeline.json` with segment events and text prompts.
 
 L2 — Music & beat analysis
-- What I do here: generate (or placeholder) short audio clips and analyze tempo/beat so animation can sync to the music.
+- What I do here: generate short audio clips and analyze tempo/beat so animation can sync to the music.
 - Notes: I cap music duration to ~10 seconds inside the `run_music_only.py` runner. If you want longer clips, we can change the cap, but short clips are easier to iterate on.
 - Output: `outputs/music.wav`, `outputs/beat_analysis.json`.
 
@@ -51,7 +49,7 @@ L5 (orchestrator) — final composition
 
 L6 — Dashboard and job server
 - What I do here: I use a small FastAPI app as a job manager and lightweight dashboard. It launches the step scripts as subprocesses, monitors their progress files, and serves `outputs/` for playback.
-- UI notes: the dashboard prefers `final_with_audio.mp4` when available. Jobs write per-job progress to `outputs/jobs/{jobid}.progress.json`; the server mirrors that into `outputs/jobs/{jobid}.json` so the UI can show progress and logs.
+
 
 ## Important files produced during a run
 
@@ -63,9 +61,8 @@ L6 — Dashboard and job server
 - `outputs/final_with_audio.wav` — companion WAV extracted by the server for playback fallback (if ffmpeg is available or MoviePy fallback works).
 - `outputs/jobs/{jobid}.json` and `.log` — job metadata and captured logs.
 
-## How I run the server and a job (Windows / cmd.exe)
+## How to run the server and a job (Windows / cmd.exe)
 
-If I want the dashboard and to start jobs from the browser, this is my sequence.
 
 1) Activate the Conda environment that has GPU support (if you want model runs on CUDA):
 
@@ -80,11 +77,11 @@ cd F:\Projects\Musical_Video_Generator
 python -m uvicorn layer_6.fastapi_server:app --host 127.0.0.1 --port 8000
 ```
 
-3) Open the dashboard: http://127.0.0.1:8000/dashboard and click the job buttons (music, anim, style, or full).
+3) Open the dashboard: http://127.0.0.1:8000/dashboard 
 
 4) Check the `outputs/` folder or the job page (GET `/jobs/{jobid}`) for progress and logs.
 
-If I prefer the command line, I run a single step directly, for example:
+In the command line, to run a single step directly, for example:
 
 ```cmd
 # run only music step and pass simple args (JSON string)
@@ -92,21 +89,6 @@ python scripts\run_music_only.py "{\"lyrics\": \"my short text\"}" my-job-id
 ```
 
 Note: the scripts accept a JSON args string followed by the jobid so they can write a per-job progress file.
-
-## Troubleshooting — the common issues I saw and fixes
-
-- Audio plays but browser shows no control / muted icon:
-	- I extract a companion WAV after each job via ffmpeg (preferred) or MoviePy. This WAV is served and the dashboard previously provided a fallback audio control. If inline controls remain disabled, open the audio file in a new tab or download and play locally.
-- Progress stuck at some intermediate percent:
-	- The server watches `outputs/jobs/{jobid}.progress.json` (preferred) and falls back to legacy progress files. If you start the server under a CPU-only Conda env, the model runs on CPU and will take much longer — start the server under a GPU-enabled env so child runners use CUDA.
-- MoviePy warnings about frame reads or small mismatched sizes:
-	- Those are usually harmless but indicate FFmpeg or imageio read quirks. I added checks to ignore zero-length files so the browser doesn't fail range requests.
-
-## Developer notes — behavior I rely on
-
-- Job runner contract: when a job starts I set `progress=1` on the job JSON so the UI shows immediate activity. Runners should write a JSON progress file at `outputs/jobs/{jobid}.progress.json` with keys like `{"pct": 30, "stage": "generating"}` as they run.
-- On process exit, the server sets `progress=100` in the job file so the UI finishes the progress bar.
-- The server will try to extract audio files for final videos using `ffmpeg` if it’s on PATH. If not, it tries a MoviePy fallback. If neither works, you’ll still get the MP4, but the dashboard may not have a separate WAV to play.
 
 ## Extending or modifying the pipeline
 
@@ -125,9 +107,4 @@ Note: the scripts accept a JSON args string followed by the jobid so they can wr
 
 I kept the pipeline intentionally modular so you can run, inspect, and iterate on individual layers. If you want, I can:
 
-- Add a small test to validate the outputs selection logic used by the dashboard.
-- Add clearer server-side extraction logs for ffmpeg failures.
-- Add a per-job artifact manifest that explicitly names the canonical final video/audio files.
-
-Tell me which of those you want next and I’ll add it. If you want any section of this README expanded or simplified, say which one and I’ll rewrite it.
 
