@@ -17,10 +17,9 @@
       <div class="control-row">
         <div class="control-column">
           <label for="lyrics">Lyrics</label>
-          <textarea id="lyrics" rows="5">In the midnight light, I’m chasing dreams through neon skies.</textarea>
-        </div>
-        <div class="control-column">
-          <label for="style">Style</label>
+          <textarea id="lyrics" rows="6">In the midnight light, I’m chasing dreams through neon skies.</textarea>
+
+          <label for="style" style="margin-top:8px">Choose Preferred Style</label>
           <select id="style">
             <option value="synthwave">synthwave</option>
             <option value="lo-fi">lo-fi</option>
@@ -29,10 +28,15 @@
           </select>
 
           <div class="buttons">
-            <button id="btn-music" class="btn primary">Run music</button>
-            <button id="btn-anim" class="btn">Animation</button>
-            <button id="btn-style" class="btn">Style</button>
-            <button id="btn-full" class="btn">Full</button>
+            <button id="btn-music" class="btn primary">Create Custom Music</button>
+            <button id="btn-anim" class="btn">Create Custom Animation</button>
+            <button id="btn-style" class="btn">Create Preferred Style</button>
+            <button id="btn-full" class="btn">Create Custom Lyric Video</button>
+          </div>
+
+          <div id="gemini-inline" style="margin-top:12px">
+            <h4 style="margin:6px 0 8px 0">What Gemini Thinks?</h4>
+            <div id="gemini-content" class="note">loading...</div>
           </div>
         </div>
       </div>
@@ -40,26 +44,26 @@
 
     <section id="status" class="card">
       <progress id="progress" value="0" max="100" class="prog"></progress>
-      <div id="logs_note" class="note">Logs are written to server-side files under <code>outputs/jobs/</code>. This UI shows status and outputs only.</div>
     </section>
 
     <section id="outputs_area">
       <div class="top-row">
         <div id="audio-card" class="media-card card">
-          <h3>Audio (music.wav)</h3>
+          <h3>Generated Audio</h3>
           <div class="media-content" id="audio-content">Loading...</div>
         </div>
         <div id="anim-card" class="media-card card">
-          <h3>Animation</h3>
+          <h3>Generated Animation</h3>
           <div class="media-content" id="anim-content">Loading...</div>
         </div>
       </div>
 
       <div id="final-card" class="card final-card">
-        <h3>Final Video</h3>
+        <h3>Generated Lyric Video</h3>
         <div class="media-content" id="final-content">Loading...</div>
       </div>
     </section>
+    
   </div>
   <script src="/static/dashboard.js"></script>
 </body>

@@ -62,27 +62,45 @@ async function updateOutputs(){
     finalEl.innerHTML = '';
 
     if(audioFile){
-      const link = document.createElement('a'); link.href = `/outputs/${audioFile}`; link.textContent = audioFile; link.target = '_blank';
       const a = document.createElement('audio'); a.src = `/outputs/${audioFile}`; a.controls = true; a.style.width = '100%';
-      audioEl.appendChild(link); audioEl.appendChild(document.createElement('br')); audioEl.appendChild(a);
+      audioEl.appendChild(a);
     } else {
       audioEl.textContent = 'No audio found.';
     }
 
     if(animFile){
-      const link = document.createElement('a'); link.href = `/outputs/${animFile}`; link.textContent = animFile; link.target = '_blank';
       const v = document.createElement('video'); v.src = `/outputs/${animFile}`; v.controls = true; v.style.width = '100%';
-      animEl.appendChild(link); animEl.appendChild(document.createElement('br')); animEl.appendChild(v);
+      animEl.appendChild(v);
     } else {
       animEl.textContent = 'No animation found.';
     }
 
     if(finalFile){
-      const link = document.createElement('a'); link.href = `/outputs/${finalFile}`; link.textContent = finalFile; link.target = '_blank';
       const v = document.createElement('video'); v.src = `/outputs/${finalFile}`; v.controls = true; v.style.width = '100%';
-      finalEl.appendChild(link); finalEl.appendChild(document.createElement('br')); finalEl.appendChild(v);
+      finalEl.appendChild(v);
     } else {
       finalEl.textContent = 'No final video found.';
+    }
+    // load Gemini analysis if present
+    try{
+      const g = await fetch('/outputs/lyrics_analysis.json');
+      if(g.ok){
+        const gj = await g.json();
+        const gemEl = document.getElementById('gemini-content');
+        gemEl.innerHTML = '';
+        const list = document.createElement('div');
+        if(gj.global_mood) list.appendChild(Object.assign(document.createElement('div'), {textContent: 'Global mood: ' + gj.global_mood}));
+        if(gj.dominant_emotion) list.appendChild(Object.assign(document.createElement('div'), {textContent: 'Dominant emotion: ' + gj.dominant_emotion}));
+        if(gj.recommended_bpm) list.appendChild(Object.assign(document.createElement('div'), {textContent: 'Recommended BPM: ' + gj.recommended_bpm}));
+        if(gj.video_prompt) list.appendChild(Object.assign(document.createElement('div'), {textContent: 'Video prompt: ' + gj.video_prompt}));
+        if(gj.music_prompt) list.appendChild(Object.assign(document.createElement('div'), {textContent: 'Music prompt: ' + gj.music_prompt}));
+        gemEl.appendChild(list);
+      }else{
+        const gemEl = document.getElementById('gemini-content');
+        gemEl.textContent = 'No Gemini analysis found.';
+      }
+    }catch(e){
+      // ignore
     }
   }catch(e){ console.log(e); }
 }

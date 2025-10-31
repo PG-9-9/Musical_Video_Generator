@@ -3,18 +3,20 @@
 }
 body{
 	font-family: system-ui, 'Segoe UI', Roboto, Arial;
-	background: var(--bg);
+	/* subtle gradient using rgba(0,0,0,0.1) as requested */
+	background: linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.1)), var(--bg);
 	padding: 22px;
 	color: #111;
 }
 .site-header{margin-bottom:12px}
-.site-header h1{margin:0;font-size:20px}
+.site-header h1{margin:0;font-size:20px;color: rgb(121, 76, 217)}
 .site-header .muted{margin:2px 0 0;color:var(--muted);font-size:13px}
-.card{background:var(--card);padding:12px;border-radius:10px;box-shadow:0 4px 14px rgba(30,35,70,0.06);margin-bottom:12px}
+.card{background:var(--card);padding:12px;border-radius:10px;box-shadow:0 4px 14px rgba(30,35,70,0.06), 0 8px 24px rgba(221,104,95,0.06);margin-bottom:12px}
 #controls textarea{width:100%;border:1px solid #e6e9f1;padding:8px;border-radius:6px}
-.control-row{display:flex;gap:12px}
-.control-column{flex:1;min-width:200px}
-.buttons{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+.control-row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start}
+.control-column{flex:1;min-width:200px;display:flex;flex-direction:column}
+.control-column select{margin-top:6px}
+.buttons{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 .btn{background:transparent;border:1px solid #d6d9ef;padding:8px 10px;border-radius:8px;cursor:pointer}
 .btn.primary{background:var(--accent);color:#fff;border-color:transparent}
 .prog{width:100%;height:14px;border-radius:8px;margin-bottom:6px}

@@ -51,22 +51,49 @@ def write_demo_jsons():
 
 
 def make_small_video(path='outputs/animated.mp4'):
+    # Try multiple strategies to create a very small demo MP4. Prefer moviepy, then try alternative import path,
+    # then fall back to imageio (if available and ffmpeg present).
     try:
-        from moviepy.editor import ImageSequenceClip
-        import numpy as np
-        frames = []
-        for i in range(24):
-            arr = np.zeros((180, 320, 3), dtype=np.uint8)
-            arr[..., 0] = int(127 + 127 * math.sin(i * 0.3))
-            arr[..., 1] = int(127 + 127 * math.sin(i * 0.2))
-            arr[..., 2] = int(127 + 127 * math.sin(i * 0.1))
-            frames.append(arr)
-        clip = ImageSequenceClip(frames, fps=12)
-        clip.write_videofile(path, codec='libx264', audio=False)
-        clip.close()
-        return True
+        try:
+            from moviepy.editor import ImageSequenceClip
+        except Exception:
+            # sometimes moviepy's submodules are available under video.io
+            try:
+                from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+            except Exception:
+                ImageSequenceClip = None
+
+        if ImageSequenceClip is not None:
+            import numpy as np
+            frames = []
+            for i in range(24):
+                arr = np.zeros((180, 320, 3), dtype=np.uint8)
+                arr[..., 0] = int(127 + 127 * math.sin(i * 0.3))
+                arr[..., 1] = int(127 + 127 * math.sin(i * 0.2))
+                arr[..., 2] = int(127 + 127 * math.sin(i * 0.1))
+                frames.append(arr)
+            clip = ImageSequenceClip(frames, fps=12)
+            clip.write_videofile(path, codec='libx264', audio=False)
+            clip.close()
+            return True
     except Exception as e:
         print('Could not create demo video via moviepy:', e)
+
+    # Try imageio fallback (requires imageio and ffmpeg)
+    try:
+        import imageio
+        import numpy as np
+        writer = imageio.get_writer(path, fps=12)
+        for i in range(24):
+            arr = (127 + 127 * np.stack([
+                np.sin(i * 0.3) * np.ones((180, 320)),
+                np.sin(i * 0.2) * np.ones((180, 320)),
+                np.sin(i * 0.1) * np.ones((180, 320))], axis=2)).astype(np.uint8)
+            writer.append_data(arr)
+        writer.close()
+        return True
+    except Exception as e:
+        print('Could not create demo video via imageio/ffmpeg fallback:', e)
         return False
 
 
@@ -75,29 +102,27 @@ def main():
     write_sine_wav()
     print('Writing demo JSONs...')
     write_demo_jsons()
-    print('Attempting to create small demo animated.mp4 (moviepy required)')
+    print('Attempting to create small demo animated.mp4 (moviepy optional)')
     ok = make_small_video()
     if ok:
         # copy animated to styled
         import shutil
         shutil.copyfile('outputs/animated.mp4', 'outputs/styled_final.mp4')
     else:
-        # create placeholder text files so dashboard can show they exist
-        with open('outputs/animated.mp4', 'wb') as f:
-            f.write(b'')
-        with open('outputs/styled_final.mp4', 'wb') as f:
-            f.write(b'')
+        # moviepy not available or creation failed — skip writing video files so UI won't show zero-byte placeholders
+        print('MoviePy not available or could not create demo video; skipping animated.mp4/styled_final.mp4 creation')
 
     pipeline = {
         "lyrics": "Demo lyrics",
         "semantic_timeline_path": "outputs/semantic_timeline.json",
         "beat_analysis_path": "outputs/beat_analysis.json",
         "music_path": "outputs/demo_music.wav",
-        "video_path": "outputs/animated.mp4",
-        "final_video_path": "outputs/final.mp4",
-        "animated_path": "outputs/animated.mp4",
-        "styled_video": "outputs/styled_final.mp4",
-        "final_with_audio": "outputs/final_with_audio.mp4"
+        # only include video paths if they actually exist
+        "video_path": "outputs/animated.mp4" if os.path.exists(os.path.join(OUT, 'animated.mp4')) else None,
+        "final_video_path": "outputs/final.mp4" if os.path.exists(os.path.join(OUT, 'final.mp4')) else None,
+        "animated_path": "outputs/animated.mp4" if os.path.exists(os.path.join(OUT, 'animated.mp4')) else None,
+        "styled_video": "outputs/styled_final.mp4" if os.path.exists(os.path.join(OUT, 'styled_final.mp4')) else None,
+        "final_with_audio": "outputs/final_with_audio.mp4" if os.path.exists(os.path.join(OUT, 'final_with_audio.mp4')) else None
     }
     with open(os.path.join(OUT, 'pipeline_outputs.json'), 'w', encoding='utf-8') as f:
         json.dump(pipeline, f, indent=2)
